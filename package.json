@@ -8,7 +8,7 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "build:apk": "npx eas-cli build --platform android --profile preview"
+    "build:apk": "npx eas-cli build --platform android --profile production"
   },
   "dependencies": {
     "expo": "~51.0.0",
@@ -16,7 +16,7 @@
     "react-native": "0.74.5",
     "react-native-vision-camera": "^4.0.0",
     "react-native-worklets-core": "^1.3.0",
-    "vision-camera-ml-kit-text-recognition": "^1.0.0"
+    "@react-native-ml-kit/text-recognition": "^1.4.0"
   },
   "devDependencies": {
     "@types/react": "~18.2.45",
