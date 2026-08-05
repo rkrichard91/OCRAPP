@@ -14,17 +14,23 @@ function corregirNumerosOCR(texto: string): string {
 }
 
 /**
- * Procesa el texto plano retornado por el motor de OCR y extrae los campos
+ * Procesa el texto plano retornado por el motor de OCR y extrae los 8 campos
  * de la cédula ecuatoriana con normalización y validación matemática.
  *
  * @param textoCrudo Texto reconocido por el motor de OCR
- * @returns Objeto DatosCedula con la información parseada y su validez
+ * @returns Objeto DatosCedula con los 8 parámetros parseados y su validez
  */
 export function procesarTextoOCR(textoCrudo: string): DatosCedula {
   if (!textoCrudo || textoCrudo.trim().length === 0) {
     return {
       numeroDocumento: null,
       codigoDactilar: null,
+      nombres: null,
+      primerApellido: null,
+      segundoApellido: null,
+      fechaNacimiento: null,
+      nacionalidad: null,
+      sexo: null,
       esCedulaValida: false,
       confianzaDocumento: 0,
       rawText: '',
@@ -32,18 +38,14 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
   }
 
   const textoUpper = textoCrudo.toUpperCase();
+  const lineas = textoUpper.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 
   // -------------------------------------------------------------
-  // 1. EXTRAER Y VALIDAR NÚMERO DE CÉDULA (DOCUMENTO)
+  // 1. NÚMERO DE CÉDULA (DOCUMENTO)
   // -------------------------------------------------------------
   let numeroCedulaEncontrado: string | null = null;
   let esValido = false;
 
-  // Buscar secuencias de 10 dígitos (pueden estar separadas por espacios o guiones)
-  const lineas = textoUpper.split('\n');
-  const bloques = textoUpper.replace(/[\n\r]/g, ' ').split(/\s+/);
-
-  // Estrategia A: Buscar números limpios de 10 dígitos en el texto
   const regexCedulaDirecta = /\b\d{10}\b/g;
   const matchesDirectos = textoUpper.match(regexCedulaDirecta) || [];
 
@@ -56,8 +58,8 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
     }
   }
 
-  // Estrategia B: Si no se encontró de forma directa, intentar corrigiendo errores de OCR por palabra/bloque
   if (!numeroCedulaEncontrado) {
+    const bloques = textoUpper.replace(/[\n\r]/g, ' ').split(/\s+/);
     for (const bloque of bloques) {
       const bloqueLimpio = bloque.replace(/[^\w]/g, '');
       if (bloqueLimpio.length === 10) {
@@ -74,7 +76,6 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
     }
   }
 
-  // Estrategia C: Buscar dígitos contiguos interrumpidos por espacios o guiones (ej. "17123 45678" o "171234567-8")
   if (!numeroCedulaEncontrado) {
     const textoSoloDigitos = textoUpper.replace(/[^\d]/g, '');
     for (let i = 0; i <= textoSoloDigitos.length - 10; i++) {
@@ -89,20 +90,15 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
   }
 
   // -------------------------------------------------------------
-  // 2. EXTRAER CÓDIGO DACTILAR (REVERSO DE CÉDULA)
-  // Formato habitual ecuatoriano: 1 Letra + 4 Números + 1 Letra + 4 Números (ej. V1234I5678)
-  // O con etiqueta previa: "CÓDIGO DACTILAR: V1234I5678"
+  // 2. CÓDIGO DACTILAR
   // -------------------------------------------------------------
   let codigoDactilarEncontrado: string | null = null;
-
-  // Pattern A: Formato estándar Letra + 4 Dígitos + Letra + 4 Dígitos
   const regexDactilarEstandar = /\b[A-Z]\d{4}[A-Z]\d{4}\b/;
   const matchDactilarDirecto = textoUpper.match(regexDactilarEstandar);
 
   if (matchDactilarDirecto) {
     codigoDactilarEncontrado = matchDactilarDirecto[0];
   } else {
-    // Pattern B: Buscar tras la palabra clave "DACTILAR", "CODIGO" o "CÓDIGO"
     const regexEtiqueta = /(?:DACTILAR|CODIGO|CÓDIGO|COD)\s*[:.-]?\s*([A-Z0-9]{8,10})/i;
     const matchEtiqueta = textoUpper.match(regexEtiqueta);
     if (matchEtiqueta && matchEtiqueta[1]) {
@@ -114,18 +110,126 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
   }
 
   // -------------------------------------------------------------
-  // 3. CÁLCULO DE PUNTAJE DE CONFIANZA
+  // 3. APELLIDOS Y NOMBRES (1er Apellido, 2do Apellido, Nombres)
+  // -------------------------------------------------------------
+  let primerApellido: string | null = null;
+  let segundoApellido: string | null = null;
+  let nombres: string | null = null;
+
+  // Estrategia A: MRZ (Machine Readable Zone en reverso de cédula biométrica)
+  // Ejemplo: PEREZ<GOMEZ<<JUAN<CARLOS<<<<<<<<<<
+  const lineaMrzNombres = lineas.find((l) => l.includes('<<') && /^[A-Z<]+$/.test(l));
+  if (lineaMrzNombres) {
+    const partesMrz = lineaMrzNombres.split('<<');
+    if (partesMrz.length >= 2) {
+      const apellidosParte = partesMrz[0].replace(/</g, ' ').trim().split(/\s+/);
+      if (apellidosParte.length >= 1) primerApellido = apellidosParte[0];
+      if (apellidosParte.length >= 2) segundoApellido = apellidosParte[1];
+      nombres = partesMrz[1].replace(/</g, ' ').trim();
+    }
+  }
+
+  // Estrategia B: Etiquetas explícitas (APELLIDOS / NOMBRES)
+  if (!primerApellido || !nombres) {
+    for (let i = 0; i < lineas.length; i++) {
+      const linea = lineas[i];
+
+      // APELLIDOS
+      if (linea.includes('APELLIDO') || linea.includes('APELLIDOS')) {
+        const textoApellidos = linea.replace(/.*APELLIDOS?\s*[:.-]?\s*/i, '').trim();
+        const listaApellidos = (textoApellidos || (lineas[i + 1] || '')).split(/\s+/);
+        if (listaApellidos.length >= 1 && listaApellidos[0].length > 1) {
+          primerApellido = listaApellidos[0];
+        }
+        if (listaApellidos.length >= 2 && listaApellidos[1].length > 1) {
+          segundoApellido = listaApellidos[1];
+        }
+      }
+
+      // NOMBRES
+      if (linea.includes('NOMBRE') || linea.includes('NOMBRES')) {
+        const textoNombres = linea.replace(/.*NOMBRES?\s*[:.-]?\s*/i, '').trim();
+        nombres = textoNombres || (lineas[i + 1] || '').trim();
+      }
+    }
+  }
+
+  // -------------------------------------------------------------
+  // 4. FECHA DE NACIMIENTO
+  // Formatos: DD/MM/AAAA, DD-MM-AAAA, DD MMM YYYY, YYYY/MM/DD
+  // -------------------------------------------------------------
+  let fechaNacimiento: string | null = null;
+  const regexFechaNumerica = /\b(0[1-9]|[12][0-9]|3[01])[\/\.-](0[1-9]|1[012])[\/\.-](19|20)\d{2}\b/;
+  const matchFecha = textoUpper.match(regexFechaNumerica);
+
+  if (matchFecha) {
+    fechaNacimiento = matchFecha[0];
+  } else {
+    // Buscar con meses en texto (ej. 15 ABR 1990)
+    const regexFechaTexto = /\b(0[1-9]|[12][0-9]|3[01])\s+(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\s+(19|20)\d{2}\b/;
+    const matchFechaTexto = textoUpper.match(regexFechaTexto);
+    if (matchFechaTexto) {
+      fechaNacimiento = matchFechaTexto[0];
+    }
+  }
+
+  // -------------------------------------------------------------
+  // 5. NACIONALIDAD
+  // -------------------------------------------------------------
+  let nacionalidad: string | null = null;
+  if (textoUpper.includes('ECUATORIANA') || textoUpper.includes('ECUATORIANO') || textoUpper.includes('ECU')) {
+    nacionalidad = 'ECUATORIANA';
+  } else {
+    const matchNac = textoUpper.match(/(?:NACIONALIDAD|NAC)\s*[:.-]?\s*([A-Z]{4,15})/);
+    if (matchNac && matchNac[1]) {
+      nacionalidad = matchNac[1];
+    }
+  }
+
+  // -------------------------------------------------------------
+  // 6. SEXO / GÉNERO
+  // -------------------------------------------------------------
+  let sexo: string | null = null;
+  if (/\bSEXO\s*[:.-]?\s*(MASCULINO|FEMENINO|M|F|H)\b/.test(textoUpper)) {
+    const matchSexo = textoUpper.match(/\bSEXO\s*[:.-]?\s*(MASCULINO|FEMENINO|M|F|H)\b/);
+    if (matchSexo) {
+      const val = matchSexo[1];
+      sexo = val === 'M' || val === 'H' || val === 'MASCULINO' ? 'MASCULINO' : 'FEMENINO';
+    }
+  } else if (/\b(MASCULINO|FEMENINO)\b/.test(textoUpper)) {
+    sexo = textoUpper.includes('MASCULINO') ? 'MASCULINO' : 'FEMENINO';
+  } else {
+    // Buscar indicador de género en MRZ (ej. 9004155M3008254ECU)
+    const matchMrzSexo = textoUpper.match(/\d{6}\d[MF]\d{7}/);
+    if (matchMrzSexo) {
+      sexo = matchMrzSexo[0].includes('M') ? 'MASCULINO' : 'FEMENINO';
+    }
+  }
+
+  // -------------------------------------------------------------
+  // 7. CÁLCULO DE CONFIANZA
   // -------------------------------------------------------------
   let confianza = 0;
-  if (numeroCedulaEncontrado) confianza += 50;
-  if (esValido) confianza += 30;
-  if (codigoDactilarEncontrado) confianza += 20;
+  if (numeroCedulaEncontrado) confianza += 30;
+  if (esValido) confianza += 20;
+  if (codigoDactilarEncontrado) confianza += 10;
+  if (nombres) confianza += 10;
+  if (primerApellido) confianza += 10;
+  if (fechaNacimiento) confianza += 10;
+  if (nacionalidad) confianza += 5;
+  if (sexo) confianza += 5;
 
   return {
     numeroDocumento: numeroCedulaEncontrado,
     codigoDactilar: codigoDactilarEncontrado,
+    nombres,
+    primerApellido,
+    segundoApellido,
+    fechaNacimiento,
+    nacionalidad,
+    sexo,
     esCedulaValida: esValido,
-    confianzaDocumento: confianza,
+    confianzaDocumento: Math.min(100, confianza),
     rawText: textoCrudo,
   };
 }

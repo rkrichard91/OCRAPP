@@ -37,11 +37,20 @@ const ocrTextFront = `
   NUI: 1710034065
   APELLIDOS: PEREZ ROCA
   NOMBRES: JUAN CARLOS
+  FECHA DE NACIMIENTO: 15/04/1990
+  NACIONALIDAD: ECUATORIANA
+  SEXO: MASCULINO
 `;
 
 const resFront = procesarTextoOCR(ocrTextFront);
 assert(resFront.numeroDocumento === '1710034065', 'Debe extraer el número de cédula 1710034065');
 assert(resFront.esCedulaValida === true, 'La cédula extraída debe ser matemáticamente válida');
+assert(resFront.primerApellido === 'PEREZ', 'Debe extraer 1er Apellido: PEREZ');
+assert(resFront.segundoApellido === 'ROCA', 'Debe extraer 2do Apellido: ROCA');
+assert(resFront.nombres === 'JUAN CARLOS', 'Debe extraer Nombres: JUAN CARLOS');
+assert(resFront.fechaNacimiento === '15/04/1990', 'Debe extraer Fecha de Nacimiento: 15/04/1990');
+assert(resFront.nacionalidad === 'ECUATORIANA', 'Debe extraer Nacionalidad: ECUATORIANA');
+assert(resFront.sexo === 'MASCULINO', 'Debe extraer Sexo: MASCULINO');
 
 const ocrTextBack = `
   REPUBLICA DEL ECUADOR
