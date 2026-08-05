@@ -37,6 +37,7 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
+          chmod -R +x ../node_modules/
           ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: 📤 Subir APK a artefactos descargables en GitHub
