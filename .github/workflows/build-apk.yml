@@ -33,11 +33,6 @@ jobs:
       - name: 📦 Instalar dependencias del proyecto
         run: npm install
 
-      - name: ⚙️ Generar proyecto nativo Android (Expo Prebuild)
-        run: |
-          chmod -R +x node_modules/.bin || true
-          npx expo prebuild --platform android --no-install
-
       - name: 🛠️ Compilar APK Release con Gradle
         working-directory: android
         run: |
