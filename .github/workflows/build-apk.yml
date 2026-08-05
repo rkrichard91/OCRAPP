@@ -34,11 +34,11 @@ jobs:
         run: npm install
 
       - name: ⚙️ Generar proyecto nativo Android (Expo Prebuild)
-        run: npx expo prebuild --platform android
+        run: npx expo prebuild --platform android --no-install
 
       - name: 🛠️ Compilar APK Release con Gradle
+        working-directory: android
         run: |
-          cd android
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
 
