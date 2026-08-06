@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, Alert, Platform } from 'react-native';
 import { Camera, useCameraDevice, useCameraDevices, useCameraPermission } from 'react-native-vision-camera';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
@@ -17,12 +17,15 @@ export const OcrScanner: React.FC<OcrScannerProps> = ({ onScanSuccess, onCancel 
   const devices = useCameraDevices();
   const backDevice = useCameraDevice('back');
   
-  // Estrategia de fallback robusta: intentar 'back', buscar cámara trasera en la lista, o usar la primera cámara disponible
   const device = backDevice ?? devices.find((d) => d.position === 'back') ?? devices[0];
   const cameraRef = useRef<Camera>(null);
 
   const [torch, setTorch] = useState(false);
   const [procesandoCaptura, setProcesandoCaptura] = useState(false);
+  const [pasoActual, setPasoActual] = useState<'frente' | 'reverso'>('frente');
+  const [frenteCapturado, setFrenteCapturado] = useState(false);
+  const [reversoCapturado, setReversoCapturado] = useState(false);
+
   const [datosAcumulados, setDatosAcumulados] = useState<DatosCedula>({
     numeroDocumento: null,
     codigoDactilar: null,
@@ -39,20 +42,28 @@ export const OcrScanner: React.FC<OcrScannerProps> = ({ onScanSuccess, onCancel 
   const [modalVisible, setModalVisible] = useState(false);
 
   useEffect(() => {
-    // Solicitar permiso de cámara explícitamente al cargar la vista
     if (!hasPermission) {
       requestPermission();
     }
   }, [hasPermission, requestPermission]);
 
   /**
-   * Procesa el texto detectado y actualiza el estado acumulado
+   * Captura foto del paso activo (Frente o Reverso) y ejecuta ML Kit OCR
    */
-  const handleTextDetected = useCallback(
-    (textFromOCR: string) => {
-      if (modalVisible) return;
+  const handleCapturarFotoOCR = async () => {
+    if (!cameraRef.current || procesandoCaptura) return;
+    try {
+      setProcesandoCaptura(true);
+      const photo = await cameraRef.current.takePhoto({
+        flash: torch ? 'on' : 'off',
+        enableShutterSound: false,
+      });
 
-      const resultado = procesarTextoOCR(textFromOCR);
+      const photoPath = Platform.OS === 'android' ? `file://${photo.path}` : photo.path;
+      const result = await TextRecognition.recognize(photoPath);
+      const textoReconocido = result?.text || '';
+
+      const resultado = procesarTextoOCR(textoReconocido);
 
       setDatosAcumulados((prev) => {
         const nuevoDoc = resultado.numeroDocumento || prev.numeroDocumento;
@@ -76,49 +87,33 @@ export const OcrScanner: React.FC<OcrScannerProps> = ({ onScanSuccess, onCancel 
           sexo: nuevoSexo,
           esCedulaValida: esValida,
           confianzaDocumento: Math.max(resultado.confianzaDocumento, prev.confianzaDocumento),
-          rawText: textFromOCR,
+          rawText: (prev.rawText + '\n' + textoReconocido).trim(),
         };
 
-        if ((nuevoDoc && esValida) || nuevoDactilar || nuevosNombres) {
+        if (pasoActual === 'frente') {
+          setFrenteCapturado(true);
+          setPasoActual('reverso');
+          Alert.alert(
+            '¡Frente Capturado Exitosamente! 📸',
+            'Ahora coloque la cédula por el REVERSO para capturar el Código Dactilar y presione Capturar Reverso.'
+          );
+        } else {
+          setReversoCapturado(true);
           setModalVisible(true);
         }
 
         return actualizados;
       });
-    },
-    [modalVisible]
-  );
-
-  /**
-   * Captura foto directamente con la cámara en vivo y ejecuta ML Kit OCR
-   */
-  const handleCapturarFotoOCR = async () => {
-    if (!cameraRef.current || procesandoCaptura) return;
-    try {
-      setProcesandoCaptura(true);
-      const photo = await cameraRef.current.takePhoto({
-        flash: torch ? 'on' : 'off',
-        enableShutterSound: false,
-      });
-
-      const photoPath = Platform.OS === 'android' ? `file://${photo.path}` : photo.path;
-      const result = await TextRecognition.recognize(photoPath);
-
-      if (result && result.text) {
-        handleTextDetected(result.text);
-      } else {
-        Alert.alert('Aviso', 'No se pudo leer texto en la imagen. Enfoque bien el documento e intente de nuevo.');
-      }
     } catch (error) {
       console.error('Error al capturar foto u OCR:', error);
-      Alert.alert('Error', 'Ocurrió un error al procesar la foto con la cámara.');
+      Alert.alert('Error', 'Ocurrió un error al procesar la foto de la cédula.');
     } finally {
       setProcesandoCaptura(false);
     }
   };
 
   const handleSimularEscaneoExitoso = () => {
-    const mockOCRText = `
+    const mockOCRTextFrente = `
       REPUBLICA DEL ECUADOR
       CEDULA DE CIUDADANIA
       NUI: 1710034065
@@ -127,9 +122,33 @@ export const OcrScanner: React.FC<OcrScannerProps> = ({ onScanSuccess, onCancel 
       FECHA DE NACIMIENTO: 15/04/1990
       NACIONALIDAD: ECUATORIANA
       SEXO: MASCULINO
+    `;
+    const mockOCRTextReverso = `
+      REPUBLICA DEL ECUADOR
       COD. DACTILAR: V1234I5678
     `;
-    handleTextDetected(mockOCRText);
+    
+    const resFrente = procesarTextoOCR(mockOCRTextFrente);
+    const resReverso = procesarTextoOCR(mockOCRTextReverso);
+
+    const consolidados: DatosCedula = {
+      numeroDocumento: resFrente.numeroDocumento,
+      codigoDactilar: resReverso.codigoDactilar,
+      nombres: resFrente.nombres,
+      primerApellido: resFrente.primerApellido,
+      segundoApellido: resFrente.segundoApellido,
+      fechaNacimiento: resFrente.fechaNacimiento,
+      nacionalidad: resFrente.nacionalidad,
+      sexo: resFrente.sexo,
+      esCedulaValida: resFrente.esCedulaValida,
+      confianzaDocumento: 100,
+      rawText: mockOCRTextFrente + '\n' + mockOCRTextReverso,
+    };
+
+    setDatosAcumulados(consolidados);
+    setFrenteCapturado(true);
+    setReversoCapturado(true);
+    setModalVisible(true);
   };
 
   const handleReintentar = () => {
@@ -146,6 +165,9 @@ export const OcrScanner: React.FC<OcrScannerProps> = ({ onScanSuccess, onCancel 
       confianzaDocumento: 0,
       rawText: '',
     });
+    setFrenteCapturado(false);
+    setReversoCapturado(false);
+    setPasoActual('frente');
     setModalVisible(false);
   };
 
@@ -180,7 +202,7 @@ export const OcrScanner: React.FC<OcrScannerProps> = ({ onScanSuccess, onCancel 
       <View style={styles.centerContainer}>
         <Text style={styles.errorTitle}>📷 Cargando Cámara...</Text>
         <Text style={styles.errorSubtitle}>
-          Inicializando sensores de cámara del dispositivo. Si el mensaje persiste, presione simular o reiniciar.
+          Inicializando sensores de cámara del dispositivo. Si el mensaje persiste, presione simular.
         </Text>
         <TouchableOpacity style={styles.btnPrimary} onPress={handleSimularEscaneoExitoso}>
           <Text style={styles.btnPrimaryText}>⚡ Simular Demo</Text>
@@ -204,23 +226,24 @@ export const OcrScanner: React.FC<OcrScannerProps> = ({ onScanSuccess, onCancel 
         torch={torch ? 'on' : 'off'}
       />
 
-      {/* Máscara de Escaneo Guiada */}
+      {/* Máscara de Escaneo Guiada de 2 Pasos */}
       <CameraOverlay
         torchActive={torch}
         onToggleTorch={() => setTorch(!torch)}
         escaneando={!modalVisible && !procesandoCaptura}
-        documentoDetectado={!!datosAcumulados.numeroDocumento && datosAcumulados.esCedulaValida}
-        dactilarDetectado={!!datosAcumulados.codigoDactilar}
+        pasoActual={pasoActual}
+        frenteCapturado={frenteCapturado}
+        reversoCapturado={reversoCapturado}
         instruccion={
           procesandoCaptura
-            ? 'Procesando lectura OCR...'
-            : datosAcumulados.numeroDocumento
-            ? 'Cédula detectada. Enfoque el reverso para código dactilar.'
-            : 'Ubique la cédula dentro del recuadro y presione Escanear.'
+            ? `Analizando OCR del ${pasoActual.toUpperCase()}...`
+            : pasoActual === 'frente'
+            ? 'Enfoque el FRENTE (Anverso) y presione "Capturar Frente"'
+            : 'Enfoque el REVERSO (Dactilar) y presione "Capturar Reverso"'
         }
       />
 
-      {/* Barra Inferior con Botón Principal de Captura OCR y Simulación */}
+      {/* Barra Inferior con Botón Principal de Captura de 2 Pasos */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
           style={[styles.captureButton, procesandoCaptura && styles.buttonDisabled]}
@@ -229,12 +252,25 @@ export const OcrScanner: React.FC<OcrScannerProps> = ({ onScanSuccess, onCancel 
           activeOpacity={0.8}
         >
           <Text style={styles.captureButtonText}>
-            {procesandoCaptura ? '⏳ Analizando OCR...' : '📸 ESCANEAR CÉDULA'}
+            {procesandoCaptura
+              ? '⏳ Analizando Imagen...'
+              : pasoActual === 'frente'
+              ? '📸 1. CAPTURAR FRENTE'
+              : '📸 2. CAPTURAR REVERSO'}
           </Text>
         </TouchableOpacity>
 
+        {frenteCapturado && (
+          <TouchableOpacity
+            style={styles.reviewButton}
+            onPress={() => setModalVisible(true)}
+          >
+            <Text style={styles.reviewButtonText}>📋 Ver Datos Extraídos (8 Campos)</Text>
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity style={styles.demoButton} onPress={handleSimularEscaneoExitoso}>
-          <Text style={styles.demoButtonText}>⚡ Simular Demo (Prueba)</Text>
+          <Text style={styles.demoButtonText}>⚡ Simular Demo (2 Caras)</Text>
         </TouchableOpacity>
       </View>
 
@@ -275,12 +311,6 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     paddingHorizontal: 20,
   },
-  errorText: {
-    color: '#EF4444',
-    fontSize: 16,
-    marginBottom: 16,
-    textAlign: 'center',
-  },
   btnPrimary: {
     backgroundColor: '#2563EB',
     paddingVertical: 14,
@@ -305,11 +335,11 @@ const styles = StyleSheet.create({
   },
   bottomBar: {
     position: 'absolute',
-    bottom: 30,
+    bottom: 25,
     left: 20,
     right: 20,
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     zIndex: 10,
   },
   captureButton: {
@@ -329,9 +359,21 @@ const styles = StyleSheet.create({
   },
   captureButtonText: {
     color: '#FFFFFF',
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: 'bold',
     letterSpacing: 0.5,
+  },
+  reviewButton: {
+    backgroundColor: '#059669',
+    width: '100%',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  reviewButtonText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    fontSize: 14,
   },
   demoButton: {
     backgroundColor: 'rgba(0, 0, 0, 0.6)',

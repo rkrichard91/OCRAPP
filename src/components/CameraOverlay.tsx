@@ -5,12 +5,13 @@ interface CameraOverlayProps {
   torchActive: boolean;
   onToggleTorch: () => void;
   escaneando: boolean;
-  documentoDetectado: boolean;
-  dactilarDetectado: boolean;
+  pasoActual: 'frente' | 'reverso';
+  frenteCapturado: boolean;
+  reversoCapturado: boolean;
   instruccion?: string;
 }
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
 // Formato ID-1 (Cédula): Proporción 1.586 (300px ancho -> 190px alto)
 const CARD_WIDTH = width * 0.85;
@@ -20,20 +21,33 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
   torchActive,
   onToggleTorch,
   escaneando,
-  documentoDetectado,
-  dactilarDetectado,
-  instruccion = 'Coloque la cédula dentro del recuadro',
+  pasoActual,
+  frenteCapturado,
+  reversoCapturado,
+  instruccion,
 }) => {
-  const borderColor = documentoDetectado && dactilarDetectado
+  const borderColor = frenteCapturado && reversoCapturado
     ? '#4CAF50'
-    : documentoDetectado || dactilarDetectado
+    : frenteCapturado || reversoCapturado
     ? '#FFC107'
     : '#00E5FF';
 
+  const textoPasoHeader = pasoActual === 'frente'
+    ? 'PASO 1 DE 2: FRENTE DE LA CÉDULA'
+    : 'PASO 2 DE 2: REVERSO DE LA CÉDULA';
+
+  const textoInstruccionPredeterminada = pasoActual === 'frente'
+    ? 'Enfoque el FRENTE de la cédula dentro del recuadro.'
+    : 'Enfoque el REVERSO de la cédula dentro del recuadro.';
+
   return (
     <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
-      {/* Máscara Superior */}
-      <View style={styles.maskTop} />
+      {/* Máscara Superior con Encabezado de Paso */}
+      <View style={styles.maskTop}>
+        <View style={styles.headerStepContainer}>
+          <Text style={styles.headerStepText}>{textoPasoHeader}</Text>
+        </View>
+      </View>
 
       {/* Máscara Central con Recuadro Transparente */}
       <View style={styles.maskMiddle}>
@@ -47,6 +61,13 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
           <View style={[styles.corner, styles.bottomLeft]} />
           <View style={[styles.corner, styles.bottomRight]} />
 
+          {/* Etiqueta flotante del paso dentro del marco */}
+          <View style={styles.frameLabelContainer}>
+            <Text style={styles.frameLabelText}>
+              {pasoActual === 'frente' ? '🖼️ ANVERSO / FRENTE' : '🔄 REVERSO / DACTILAR'}
+            </Text>
+          </View>
+
           {/* Línea de escaneo animada visual */}
           {escaneando && <View style={styles.scanLine} />}
         </View>
@@ -54,21 +75,21 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
         <View style={styles.maskRight} />
       </View>
 
-      {/* Máscara Inferior y Controles */}
+      {/* Máscara Inferior e Indicadores de Captura */}
       <View style={styles.maskBottom}>
-        <Text style={styles.instructionText}>{instruccion}</Text>
+        <Text style={styles.instructionText}>{instruccion || textoInstruccionPredeterminada}</Text>
 
-        {/* Indicadores de Detección */}
+        {/* Indicadores de Detección de ambas caras */}
         <View style={styles.statusContainer}>
-          <View style={[styles.statusBadge, documentoDetectado && styles.badgeSuccess]}>
+          <View style={[styles.statusBadge, frenteCapturado && styles.badgeSuccess]}>
             <Text style={styles.badgeText}>
-              {documentoDetectado ? '✓ Cédula' : '○ Cédula (Anverso)'}
+              {frenteCapturado ? '✓ 1. Frente Capturado' : '○ 1. Frente (Anverso)'}
             </Text>
           </View>
 
-          <View style={[styles.statusBadge, dactilarDetectado && styles.badgeSuccess]}>
+          <View style={[styles.statusBadge, reversoCapturado && styles.badgeSuccess]}>
             <Text style={styles.badgeText}>
-              {dactilarDetectado ? '✓ C. Dactilar' : '○ Dactilar (Reverso)'}
+              {reversoCapturado ? '✓ 2. Reverso Capturado' : '○ 2. Reverso (Dactilar)'}
             </Text>
           </View>
         </View>
@@ -92,6 +113,23 @@ const styles = StyleSheet.create({
   maskTop: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingBottom: 12,
+  },
+  headerStepContainer: {
+    backgroundColor: 'rgba(0, 229, 255, 0.2)',
+    borderWidth: 1,
+    borderColor: '#00E5FF',
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+  },
+  headerStepText: {
+    color: '#00E5FF',
+    fontSize: 13,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
   },
   maskMiddle: {
     height: CARD_HEIGHT,
@@ -113,12 +151,25 @@ const styles = StyleSheet.create({
     position: 'relative',
     backgroundColor: 'transparent',
     overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  frameLabelContainer: {
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  frameLabelText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
   },
   maskBottom: {
     flex: 1.2,
     backgroundColor: 'rgba(0, 0, 0, 0.65)',
     alignItems: 'center',
-    paddingTop: 20,
+    paddingTop: 16,
     paddingHorizontal: 20,
   },
   corner: {
@@ -170,16 +221,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
   },
   statusContainer: {
     flexDirection: 'row',
-    gap: 12,
-    marginBottom: 20,
+    gap: 10,
+    marginBottom: 16,
   },
   statusBadge: {
     paddingVertical: 6,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     borderRadius: 20,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
@@ -188,13 +239,13 @@ const styles = StyleSheet.create({
   },
   badgeText: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
   torchButton: {
     backgroundColor: 'rgba(255, 255, 255, 0.25)',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
     borderRadius: 25,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.4)',
@@ -206,6 +257,6 @@ const styles = StyleSheet.create({
   torchText: {
     color: '#FFFFFF',
     fontWeight: 'bold',
-    fontSize: 14,
+    fontSize: 13,
   },
 });
