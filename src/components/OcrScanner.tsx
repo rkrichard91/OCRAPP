@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, Alert, Platform } from 'react-native';
-import { Camera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
+import { Camera, useCameraDevice, useCameraDevices, useCameraPermission } from 'react-native-vision-camera';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
 import { procesarTextoOCR } from '../utils/ocrParser';
 import { CameraOverlay } from './CameraOverlay';
@@ -14,7 +14,11 @@ interface OcrScannerProps {
 
 export const OcrScanner: React.FC<OcrScannerProps> = ({ onScanSuccess, onCancel }) => {
   const { hasPermission, requestPermission } = useCameraPermission();
-  const device = useCameraDevice('back');
+  const devices = useCameraDevices();
+  const backDevice = useCameraDevice('back');
+  
+  // Estrategia de fallback robusta: intentar 'back', buscar cámara trasera en la lista, o usar la primera cámara disponible
+  const device = backDevice ?? devices.find((d) => d.position === 'back') ?? devices[0];
   const cameraRef = useRef<Camera>(null);
 
   const [torch, setTorch] = useState(false);
@@ -174,7 +178,13 @@ export const OcrScanner: React.FC<OcrScannerProps> = ({ onScanSuccess, onCancel 
   if (!device) {
     return (
       <View style={styles.centerContainer}>
-        <Text style={styles.errorText}>No se detectó un dispositivo de cámara activo.</Text>
+        <Text style={styles.errorTitle}>📷 Cargando Cámara...</Text>
+        <Text style={styles.errorSubtitle}>
+          Inicializando sensores de cámara del dispositivo. Si el mensaje persiste, presione simular o reiniciar.
+        </Text>
+        <TouchableOpacity style={styles.btnPrimary} onPress={handleSimularEscaneoExitoso}>
+          <Text style={styles.btnPrimaryText}>⚡ Simular Demo</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={styles.btnSecondary} onPress={onCancel}>
           <Text style={styles.btnText}>Volver</Text>
         </TouchableOpacity>
