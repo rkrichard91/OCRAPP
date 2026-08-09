@@ -56,19 +56,22 @@ export const OcrScanner: React.FC<OcrScannerProps> = ({ onScanSuccess, onCancel,
   }, [autoOpenGallery]);
 
   /**
-   * Procesa la imagen desde la Galería de Fotos / Sistema de Archivos
+   * Procesa 1 o 2 imágenes (Frente y Reverso) desde la Galería de Fotos
    */
-  const handleSeleccionarImagenGaleria = async () => {
+  const handleSeleccionarImagenGaleria = async (pasoDestino?: 'frente' | 'reverso') => {
     try {
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
-        Alert.alert('Permiso Denegado 📁', 'Se requiere acceso a la galería para seleccionar una imagen de la cédula.');
+        Alert.alert('Permiso Denegado 📁', 'Se requiere acceso a la galería para seleccionar imágenes de la cédula.');
         return;
       }
 
+      // Permite selección múltiple de hasta 2 imágenes (Frente y Reverso)
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
+        allowsMultipleSelection: true,
+        selectionLimit: 2,
         quality: 1,
       });
 
@@ -77,54 +80,122 @@ export const OcrScanner: React.FC<OcrScannerProps> = ({ onScanSuccess, onCancel,
       }
 
       setProcesandoCaptura(true);
-      const imageUri = result.assets[0].uri;
+      const assets = result.assets;
 
-      const ocrResult = await TextRecognition.recognize(imageUri);
-      const textoReconocido = ocrResult?.text || '';
+      // CASO A: El usuario seleccionó 2 o más fotos simultáneamente
+      if (assets.length >= 2) {
+        let textoAcumuladoBatch = '';
+        let nuevoDoc: string | null = null;
+        let nuevoDactilar: string | null = null;
+        let nuevosNombres: string | null = null;
+        let nuevo1erApellido: string | null = null;
+        let nuevo2doApellido: string | null = null;
+        let nuevaFechaNac: string | null = null;
+        let nuevaNac: string | null = null;
+        let nuevoSexo: string | null = null;
+        let esValida = false;
+        let maxConfianza = 0;
 
-      if (!textoReconocido || textoReconocido.trim().length === 0) {
-        Alert.alert('⚠️ Sin Texto', 'No se pudo detectar texto en la imagen seleccionada. Asegúrese de elegir una foto clara de la cédula.');
-        return;
-      }
+        for (let idx = 0; idx < 2; idx++) {
+          const uri = assets[idx].uri;
+          const ocrResult = await TextRecognition.recognize(uri);
+          const txt = ocrResult?.text || '';
+          textoAcumuladoBatch += '\n' + txt;
 
-      const resultado = procesarTextoOCR(textoReconocido);
+          const res = procesarTextoOCR(txt);
+          if (res.numeroDocumento) nuevoDoc = res.numeroDocumento;
+          if (res.codigoDactilar) nuevoDactilar = res.codigoDactilar;
+          if (res.nombres) nuevosNombres = res.nombres;
+          if (res.primerApellido) nuevo1erApellido = res.primerApellido;
+          if (res.segundoApellido) nuevo2doApellido = res.segundoApellido;
+          if (res.fechaNacimiento) nuevaFechaNac = res.fechaNacimiento;
+          if (res.nacionalidad) nuevaNac = res.nacionalidad;
+          if (res.sexo) nuevoSexo = res.sexo;
+          if (res.esCedulaValida) esValida = true;
+          maxConfianza = Math.max(maxConfianza, res.confianzaDocumento);
+        }
 
-      if (!resultado.numeroDocumento && !resultado.nombres && !resultado.codigoDactilar) {
-        Alert.alert(
-          '⚠️ Sin Cédula Detectada',
-          'No se identificaron patrones de cédula ecuatoriana en la foto seleccionada. Intente subir una imagen más nítida, sin reflejos y bien enfocado el documento.'
-        );
-      }
-
-      setDatosAcumulados((prev) => {
-        const nuevoDoc = resultado.numeroDocumento || prev.numeroDocumento;
-        const nuevoDactilar = resultado.codigoDactilar || prev.codigoDactilar;
-        const nuevosNombres = resultado.nombres || prev.nombres;
-        const nuevo1erApellido = resultado.primerApellido || prev.primerApellido;
-        const nuevo2doApellido = resultado.segundoApellido || prev.segundoApellido;
-        const nuevaFechaNac = resultado.fechaNacimiento || prev.fechaNacimiento;
-        const nuevaNac = resultado.nacionalidad || prev.nacionalidad;
-        const nuevoSexo = resultado.sexo || prev.sexo;
-        const esValida = resultado.esCedulaValida || prev.esCedulaValida;
-
-        const actualizados: DatosCedula = {
-          numeroDocumento: nuevoDoc,
-          codigoDactilar: nuevoDactilar,
-          nombres: nuevosNombres,
-          primerApellido: nuevo1erApellido,
-          segundoApellido: nuevo2doApellido,
-          fechaNacimiento: nuevaFechaNac,
-          nacionalidad: nuevaNac,
-          sexo: nuevoSexo,
-          esCedulaValida: esValida,
-          confianzaDocumento: Math.max(resultado.confianzaDocumento, prev.confianzaDocumento),
-          rawText: (prev.rawText + '\n' + textoReconocido).trim(),
-        };
+        setDatosAcumulados((prev) => ({
+          numeroDocumento: nuevoDoc || prev.numeroDocumento,
+          codigoDactilar: nuevoDactilar || prev.codigoDactilar,
+          nombres: nuevosNombres || prev.nombres,
+          primerApellido: nuevo1erApellido || prev.primerApellido,
+          segundoApellido: nuevo2doApellido || prev.segundoApellido,
+          fechaNacimiento: nuevaFechaNac || prev.fechaNacimiento,
+          nacionalidad: nuevaNac || prev.nacionalidad,
+          sexo: nuevoSexo || prev.sexo,
+          esCedulaValida: esValida || prev.esCedulaValida,
+          confianzaDocumento: Math.max(maxConfianza, prev.confianzaDocumento),
+          rawText: (prev.rawText + '\n' + textoAcumuladoBatch).trim(),
+        }));
 
         setFrenteCapturado(true);
+        setReversoCapturado(true);
         setModalVisible(true);
-        return actualizados;
-      });
+      } else {
+        // CASO B: El usuario seleccionó 1 foto individual (Frente o Reverso)
+        const imageUri = assets[0].uri;
+        const ocrResult = await TextRecognition.recognize(imageUri);
+        const textoReconocido = ocrResult?.text || '';
+
+        if (!textoReconocido || textoReconocido.trim().length === 0) {
+          Alert.alert('⚠️ Sin Texto', 'No se pudo detectar texto en la imagen seleccionada. Asegúrese de elegir una foto clara de la cédula.');
+          return;
+        }
+
+        const resultado = procesarTextoOCR(textoReconocido);
+        const pasoTarget = pasoDestino || pasoActual;
+
+        setDatosAcumulados((prev) => {
+          const nuevoDoc = resultado.numeroDocumento || prev.numeroDocumento;
+          const nuevoDactilar = resultado.codigoDactilar || prev.codigoDactilar;
+          const nuevosNombres = resultado.nombres || prev.nombres;
+          const nuevo1erApellido = resultado.primerApellido || prev.primerApellido;
+          const nuevo2doApellido = resultado.segundoApellido || prev.segundoApellido;
+          const nuevaFechaNac = resultado.fechaNacimiento || prev.fechaNacimiento;
+          const nuevaNac = resultado.nacionalidad || prev.nacionalidad;
+          const nuevoSexo = resultado.sexo || prev.sexo;
+          const esValida = resultado.esCedulaValida || prev.esCedulaValida;
+
+          const actualizados: DatosCedula = {
+            numeroDocumento: nuevoDoc,
+            codigoDactilar: nuevoDactilar,
+            nombres: nuevosNombres,
+            primerApellido: nuevo1erApellido,
+            segundoApellido: nuevo2doApellido,
+            fechaNacimiento: nuevaFechaNac,
+            nacionalidad: nuevaNac,
+            sexo: nuevoSexo,
+            esCedulaValida: esValida,
+            confianzaDocumento: Math.max(resultado.confianzaDocumento, prev.confianzaDocumento),
+            rawText: (prev.rawText + '\n' + textoReconocido).trim(),
+          };
+
+          if (pasoTarget === 'frente' && !reversoCapturado) {
+            setFrenteCapturado(true);
+            setPasoActual('reverso');
+            Alert.alert(
+              '📸 1 de 2: Frente Cargado Exitosamente',
+              'Se procesaron los datos del FRENTE de la cédula.\n\n¿Desea seleccionar ahora la foto del REVERSO (Código Dactilar) de la galería?',
+              [
+                {
+                  text: '🖼️ Cargar Foto 2 (Reverso)',
+                  onPress: () => setTimeout(() => handleSeleccionarImagenGaleria('reverso'), 300),
+                },
+                {
+                  text: '📋 Ver Datos Capturados',
+                  onPress: () => setModalVisible(true),
+                },
+              ]
+            );
+          } else {
+            setReversoCapturado(true);
+            setModalVisible(true);
+          }
+
+          return actualizados;
+        });
+      }
     } catch (error) {
       console.error('Error al seleccionar imagen:', error);
       Alert.alert('Error', 'Ocurrió un error al procesar la imagen de la galería.');
