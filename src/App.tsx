@@ -4,7 +4,7 @@ import { FileUploader } from './components/FileUploader';
 import { WebCameraScanner } from './components/WebCameraScanner';
 import { VerificationResultModal } from './components/VerificationResultModal';
 import { ejecutarOcrWeb } from './utils/webOcrEngine';
-import { consultarCedulaAPI } from './services/verificationService';
+import { consultarCedulaAPI, enriquecerConDatosAPI } from './services/verificationService';
 import { DatosCedula, ApiVerificationResult } from './types/cedula';
 import { ShieldCheck, Cpu, Database, CheckCircle2, Lock } from 'lucide-react';
 
@@ -76,7 +76,7 @@ export const App: React.FC = () => {
         rawStr += '\n' + resReverso.rawText;
       }
 
-      const datosFinales: DatosCedula = {
+      let datosFinales: DatosCedula = {
         numeroDocumento: doc,
         codigoDactilar: dactilar,
         nombres: nom,
@@ -90,17 +90,19 @@ export const App: React.FC = () => {
         rawText: rawStr.trim(),
       };
 
-      setDatosAcumulados(datosFinales);
-
-      // Si existe un número de cédula, consultar la API pública de verificación
+      // Si existe un número de cédula, consultar la API pública de verificación y autocompletar campos faltantes
       if (doc) {
         setProgresoMensaje('Consultando API de Verificación Oficial en Ecuador...');
         const apiRes = await consultarCedulaAPI(doc);
         setApiResult(apiRes);
+        if (apiRes && apiRes.exito && apiRes.nombreCompletoOficial) {
+          datosFinales = enriquecerConDatosAPI(datosFinales, apiRes);
+        }
       } else {
         setApiResult(null);
       }
 
+      setDatosAcumulados(datosFinales);
       setModalVisible(true);
     } catch (error) {
       console.error('Error al procesar archivos:', error);
@@ -118,41 +120,33 @@ export const App: React.FC = () => {
     try {
       const res = await ejecutarOcrWeb(canvas, (pct, msg) => setProgresoMensaje(msg));
 
-      setDatosAcumulados((prev) => {
-        const nuevoDoc = res.numeroDocumento || prev.numeroDocumento;
-        const nuevoDactilar = res.codigoDactilar || prev.codigoDactilar;
-        const nuevosNombres = res.nombres || prev.nombres;
-        const nuevo1erAp = res.primerApellido || prev.primerApellido;
-        const nuevo2doAp = res.segundoApellido || prev.segundoApellido;
-        const nuevaFecha = res.fechaNacimiento || prev.fechaNacimiento;
-        const nuevaNac = res.nacionalidad || prev.nacionalidad;
-        const nuevoSexo = res.sexo || prev.sexo;
-        const esVal = res.esCedulaValida || prev.esCedulaValida;
+      let actualizados: DatosCedula = {
+        numeroDocumento: res.numeroDocumento || datosAcumulados.numeroDocumento,
+        codigoDactilar: res.codigoDactilar || datosAcumulados.codigoDactilar,
+        nombres: res.nombres || datosAcumulados.nombres,
+        primerApellido: res.primerApellido || datosAcumulados.primerApellido,
+        segundoApellido: res.segundoApellido || datosAcumulados.segundoApellido,
+        fechaNacimiento: res.fechaNacimiento || datosAcumulados.fechaNacimiento,
+        nacionalidad: res.nacionalidad || datosAcumulados.nacionalidad,
+        sexo: res.sexo || datosAcumulados.sexo,
+        esCedulaValida: res.esCedulaValida || datosAcumulados.esCedulaValida,
+        confianzaDocumento: Math.max(res.confianzaDocumento, datosAcumulados.confianzaDocumento),
+        rawText: (datosAcumulados.rawText + '\n' + res.rawText).trim(),
+      };
 
-        const actualizados: DatosCedula = {
-          numeroDocumento: nuevoDoc,
-          codigoDactilar: nuevoDactilar,
-          nombres: nuevosNombres,
-          primerApellido: nuevo1erAp,
-          segundoApellido: nuevo2doAp,
-          fechaNacimiento: nuevaFecha,
-          nacionalidad: nuevaNac,
-          sexo: nuevoSexo,
-          esCedulaValida: esVal,
-          confianzaDocumento: Math.max(res.confianzaDocumento, prev.confianzaDocumento),
-          rawText: (prev.rawText + '\n' + res.rawText).trim(),
-        };
-
-        if (nuevoDoc) {
-          consultarCedulaAPI(nuevoDoc).then((apiRes) => setApiResult(apiRes));
+      if (actualizados.numeroDocumento) {
+        const apiRes = await consultarCedulaAPI(actualizados.numeroDocumento);
+        setApiResult(apiRes);
+        if (apiRes && apiRes.exito && apiRes.nombreCompletoOficial) {
+          actualizados = enriquecerConDatosAPI(actualizados, apiRes);
         }
+      }
 
-        if (lado === 'reverso' || (prev.primerApellido && prev.codigoDactilar)) {
-          setModalVisible(true);
-        }
+      setDatosAcumulados(actualizados);
 
-        return actualizados;
-      });
+      if (lado === 'reverso' || (actualizados.primerApellido && actualizados.codigoDactilar)) {
+        setModalVisible(true);
+      }
     } catch (err) {
       console.error('Error al procesar foto de cámara:', err);
     } finally {

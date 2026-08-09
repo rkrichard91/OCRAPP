@@ -85,3 +85,31 @@ export async function consultarCedulaAPI(cedula: string): Promise<ApiVerificatio
     mensaje: `Cédula ${cedulaLimpia} verificada y matemáticamente válida para ${provNombre}.`,
   };
 }
+
+/**
+ * Autocompleta o corrige inteligentemente datos no detectados por el OCR (1er Apellido, 2do Apellido, Nombres)
+ * utilizando el nombre completo oficial retornado por la consulta API.
+ */
+export function enriquecerConDatosAPI(datosOCR: any, apiRes: ApiVerificationResult): any {
+  if (!apiRes || !apiRes.exito || !apiRes.nombreCompletoOficial) {
+    return datosOCR;
+  }
+
+  const nombreOficial = apiRes.nombreCompletoOficial.trim();
+  const partes = nombreOficial.split(/\s+/).filter(Boolean);
+
+  if (partes.length < 2) {
+    return datosOCR;
+  }
+
+  const ap1Oficial = partes[0];
+  const ap2Oficial = partes.length >= 3 ? partes[1] : null;
+  const nombresOficial = partes.slice(partes.length >= 3 ? 2 : 1).join(' ');
+
+  return {
+    ...datosOCR,
+    primerApellido: datosOCR.primerApellido || ap1Oficial,
+    segundoApellido: datosOCR.segundoApellido || ap2Oficial,
+    nombres: datosOCR.nombres || nombresOficial,
+  };
+}
