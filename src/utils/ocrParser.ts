@@ -118,32 +118,48 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
   // -------------------------------------------------------------
   // 1. NÚMERO DE CÉDULA (DOCUMENTO NUI)
   // Formatos soportados:
-  // - Formato 1 (Biométrica Digital): "NUI.1723454961" o "No. DOCUMENTO 049101218"
+  // - Formato 1 (Biométrica Digital): "NUI.1350827596" o "NUI 1723454961"
   // - Formato 2 (Niño/Adolescente): "No. 1756057459"
-  // - Formato 3 (Plástica con Chip): "No. 092168471-8" (guión antes del verificador)
+  // - Formato 3 (Plástica con Chip): "No. 092168471-8"
   // -------------------------------------------------------------
   let numeroCedulaEncontrado: string | null = null;
   let esValido = false;
 
-  // A. Coincidencia directa con guión o sufijo (ej. 092168471-8 -> 0921684718)
-  const matchesConGuion = textoUpper.match(/\b\d{9}[-.]?\d\b/g) || [];
-  for (const match of matchesConGuion) {
-    const candidatoLimpio = match.replace(/[^\d]/g, '');
-    if (candidatoLimpio.length === 10) {
-      const res = validarCedulaEcuatoriana(candidatoLimpio);
+  // A. Coincidencia directa con etiqueta NUI. (ej. NUI.1350827596 o NUI: 1710034065)
+  const matchNuiEtiqueta = textoUpper.match(/\bNUI\.?\s*[:.-]?\s*([0-9OIQILSZBGT\s.-]{9,15})/i);
+  if (matchNuiEtiqueta && matchNuiEtiqueta[1]) {
+    const candidatoLimpio = corregirNumerosOCR(matchNuiEtiqueta[1].replace(/[^\w]/g, ''));
+    if (candidatoLimpio.length >= 10) {
+      const sub10 = candidatoLimpio.substring(0, 10);
+      const res = validarCedulaEcuatoriana(sub10);
       if (res.esValido) {
-        numeroCedulaEncontrado = candidatoLimpio;
+        numeroCedulaEncontrado = sub10;
         esValido = true;
-        break;
       }
     }
   }
 
-  // B. Coincidencia tras prefijos NUI., NUI, No., Nº, CEDULA
+  // B. Coincidencia directa con guión o sufijo (ej. 092168471-8 -> 0921684718)
   if (!numeroCedulaEncontrado) {
-    const matchEtiquetaNui = textoUpper.match(/(?:NUI\.?|NO\.?|Nº|CEDULA|DOCUMENTO)\s*[:.-]?\s*([0-9OIQILSZBGT\s.-]{9,15})/i);
-    if (matchEtiquetaNui && matchEtiquetaNui[1]) {
-      const candidatoLimpio = corregirNumerosOCR(matchEtiquetaNui[1].replace(/[^\w]/g, ''));
+    const matchesConGuion = textoUpper.match(/\b\d{9}[-.]?\d\b/g) || [];
+    for (const match of matchesConGuion) {
+      const candidatoLimpio = match.replace(/[^\d]/g, '');
+      if (candidatoLimpio.length === 10) {
+        const res = validarCedulaEcuatoriana(candidatoLimpio);
+        if (res.esValido) {
+          numeroCedulaEncontrado = candidatoLimpio;
+          esValido = true;
+          break;
+        }
+      }
+    }
+  }
+
+  // C. Escanear tras prefijos genéricos No., Nº, CEDULA, DOCUMENTO
+  if (!numeroCedulaEncontrado) {
+    const matchEtiquetaGenerica = textoUpper.match(/(?:NO\.?|Nº|CEDULA|DOCUMENTO)\s*[:.-]?\s*([0-9OIQILSZBGT\s.-]{9,15})/i);
+    if (matchEtiquetaGenerica && matchEtiquetaGenerica[1]) {
+      const candidatoLimpio = corregirNumerosOCR(matchEtiquetaGenerica[1].replace(/[^\w]/g, ''));
       if (candidatoLimpio.length >= 10) {
         const sub10 = candidatoLimpio.substring(0, 10);
         const res = validarCedulaEcuatoriana(sub10);
@@ -155,7 +171,7 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
     }
   }
 
-  // C. Escanear en líneas MRZ (ej. I<ECU0491012184<<<<<1723454961 o IDECU0921684718<<<<<)
+  // D. Escanear en líneas MRZ (ej. I<ECU0491012184<<<<<1723454961 o IDECU0921684718<<<<<)
   if (!numeroCedulaEncontrado) {
     const mrzDigitsMatches = textoUpper.match(/(?:ECU|IDECU)([0-9OIQILSZBGT]{10})/g) || [];
     for (const mrzMatch of mrzDigitsMatches) {
@@ -170,7 +186,7 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
     }
   }
 
-  // D. Barrido de ventana deslizante sobre texto completo corrigiendo caracteres ambiguos
+  // E. Barrido de ventana deslizante sobre texto completo corrigiendo caracteres ambiguos
   if (!numeroCedulaEncontrado) {
     const textoLimpiado = textoUpper.replace(/[^A-Z0-9]/g, '');
     const textoCorregido = corregirNumerosOCR(textoLimpiado);
