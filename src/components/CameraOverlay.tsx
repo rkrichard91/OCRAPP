@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Dimensions } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, useWindowDimensions } from 'react-native';
 
 interface CameraOverlayProps {
   torchActive: boolean;
@@ -11,12 +11,6 @@ interface CameraOverlayProps {
   instruccion?: string;
 }
 
-const { width } = Dimensions.get('window');
-
-// Formato ID-1 (Cédula): Proporción 1.586 (300px ancho -> 190px alto)
-const CARD_WIDTH = width * 0.85;
-const CARD_HEIGHT = CARD_WIDTH / 1.586;
-
 export const CameraOverlay: React.FC<CameraOverlayProps> = ({
   torchActive,
   onToggleTorch,
@@ -26,6 +20,15 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
   reversoCapturado,
   instruccion,
 }) => {
+  const { width, height } = useWindowDimensions();
+  const isLandscape = width > height;
+
+  // Formato ID-1 (Cédula): Proporción 1.586
+  const cardWidth = isLandscape
+    ? Math.min(width * 0.55, height * 0.65 * 1.586)
+    : width * 0.85;
+  const cardHeight = cardWidth / 1.586;
+
   const borderColor = frenteCapturado && reversoCapturado
     ? '#4CAF50'
     : frenteCapturado || reversoCapturado
@@ -50,11 +53,11 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
       </View>
 
       {/* Máscara Central con Recuadro Transparente */}
-      <View style={styles.maskMiddle}>
+      <View style={[styles.maskMiddle, { height: cardHeight }]}>
         <View style={styles.maskLeft} />
         
         {/* Recuadro Guía de la Cédula */}
-        <View style={[styles.targetBox, { borderColor }]}>
+        <View style={[styles.targetBox, { width: cardWidth, height: cardHeight, borderColor }]}>
           {/* Esquinas decorativas */}
           <View style={[styles.corner, styles.topLeft]} />
           <View style={[styles.corner, styles.topRight]} />
@@ -132,7 +135,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   maskMiddle: {
-    height: CARD_HEIGHT,
     flexDirection: 'row',
   },
   maskLeft: {
@@ -144,8 +146,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.65)',
   },
   targetBox: {
-    width: CARD_WIDTH,
-    height: CARD_HEIGHT,
     borderWidth: 2,
     borderRadius: 12,
     position: 'relative',

@@ -160,6 +160,21 @@ assert(resF3.fechaNacimiento === '01/09/1982', 'F3: Fecha 1982-09-01 a 01/09/198
 assert(resF3.sexo === 'FEMENINO', 'F3: Sexo F a FEMENINO');
 assert(resF3.codigoDactilar === 'V4333V2242', 'F3: Dactilar V4333V2242 sin etiqueta');
 
+// 9. TEST: Distinguir Fecha de Nacimiento vs Fecha de Expedición y Expiración
+const ocrConExpedicionYNacimiento = `
+  REPUBLICA DEL ECUADOR
+  CEDULA DE CIUDADANIA
+  NUI: 1710034065
+  APELLIDOS Y NOMBRES: PEREZ ROCA JUAN CARLOS
+  LUGAR Y FECHA DE EXPEDICION: QUITO 2024-05-10
+  FECHA DE EXPIRACION: 2034-05-10
+  FECHA DE NACIMIENTO: 1990-04-15
+  SEXO: MASCULINO
+`;
+const resFechas = procesarTextoOCR(ocrConExpedicionYNacimiento);
+assert(resFechas.fechaNacimiento === '15/04/1990', 'Debe extraer la Fecha de Nacimiento (15/04/1990) e ignorar la de expedición (2024-05-10)');
+
 console.log('--- ALL TESTS COMPLETED SUCCESSFULLY! ---');
+
 
 

@@ -283,33 +283,73 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
   // - Formato 1: "01 JUN 1996" (DD MMM YYYY)
   // - Formato 2: "2002-02-05" (YYYY-MM-DD)
   // - Formato 3: "1982-09-01" (YYYY-MM-DD)
-  // - Formato Estándar: "15/04/1990" (DD/MM/YYYY)
   // -------------------------------------------------------------
   let fechaNacimiento: string | null = null;
   const textoNormalizadoFechas = textoUpper.replace(/(\d{2,4})[\|I!l\.](\d{2})[\|I!l\.](\d{2,4})/g, '$1/$2/$3');
 
-  // A. Formato YYYY-MM-DD o YYYY/MM/DD
-  const regexFechaISO = /\b(19|20)\d{2}[\/\.-](0[1-9]|1[012])[\/\.-](0[1-9]|[12][0-9]|3[01])\b/;
-  const matchISO = textoNormalizadoFechas.match(regexFechaISO);
+  const parsearFechaString = (str: string): string | null => {
+    if (!str) return null;
+    const strNorm = str.replace(/(\d{1,4})[\|I!l\.](\d{1,2})[\|I!l\.](\d{1,4})/g, '$1/$2/$3');
 
-  // B. Formato DD/MM/YYYY
-  const regexFechaDDMM = /\b(0[1-9]|[12][0-9]|3[01])[\/\.-](0[1-9]|1[012])[\/\.-](19|20)\d{2}\b/;
-  const matchDDMM = textoNormalizadoFechas.match(regexFechaDDMM);
+    // A. Formato DD/MM/YYYY
+    const matchDDMM = strNorm.match(/\b(0[1-9]|[12][0-9]|3[01])[\/\.-](0[1-9]|1[012])[\/\.-](19|20)\d{2}\b/);
+    if (matchDDMM) return matchDDMM[0].replace(/[\.-]/g, '/');
 
-  // C. Formato DD MMM YYYY (ej. 01 JUN 1996)
-  const regexFechaTexto = /\b(0[1-9]|[12][0-9]|3[01])\s+(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\s+(19|20)\d{2}\b/;
-  const matchTexto = textoNormalizadoFechas.match(regexFechaTexto);
+    // B. Formato YYYY-MM-DD o YYYY/MM/DD
+    const matchISO = strNorm.match(/\b(19|20)\d{2}[\/\.-](0[1-9]|1[012])[\/\.-](0[1-9]|[12][0-9]|3[01])\b/);
+    if (matchISO) {
+      const partes = matchISO[0].split(/[\/\.-]/);
+      return `${partes[2]}/${partes[1]}/${partes[0]}`;
+    }
 
-  if (matchDDMM) {
-    fechaNacimiento = matchDDMM[0];
-  } else if (matchISO) {
-    // Convertir YYYY-MM-DD a DD/MM/YYYY para mantener formato consistente
-    const partes = matchISO[0].split(/[\/\.-]/);
-    fechaNacimiento = `${partes[2]}/${partes[1]}/${partes[0]}`;
-  } else if (matchTexto) {
-    const partes = matchTexto[0].split(/\s+/);
-    const mesNum = MESES_MAP[partes[1]] || '01';
-    fechaNacimiento = `${partes[0]}/${mesNum}/${partes[2]}`;
+    // C. Formato DD MMM YYYY (ej. 01 JUN 1996)
+    const matchTexto = strNorm.match(/\b(0[1-9]|[12][0-9]|3[01])\s+(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\s+(19|20)\d{2}\b/);
+    if (matchTexto) {
+      const partes = matchTexto[0].split(/\s+/);
+      const mesNum = MESES_MAP[partes[1]] || '01';
+      return `${partes[0]}/${mesNum}/${partes[2]}`;
+    }
+    return null;
+  };
+
+  // Estrategia A: Buscar explícitamente en la línea de NACIMIENTO (excluyendo EXPEDICION / EXPIRACION / VENCIMIENTO)
+  for (let i = 0; i < lineas.length; i++) {
+    const l = lineas[i];
+    if ((l.includes('NACIMIENTO') || l.includes('FECHA NAC')) && !l.includes('EXPEDICION') && !l.includes('EXPIRACION') && !l.includes('VENCIMIENTO') && !l.includes('EMISION')) {
+      let f = parsearFechaString(l);
+      if (!f && i + 1 < lineas.length) {
+        f = parsearFechaString(lineas[i + 1]);
+      }
+      if (f) {
+        fechaNacimiento = f;
+        break;
+      }
+    }
+  }
+
+  // Estrategia B: Extraer de MRZ Zona Línea 2 (Primeros 6 dígitos son YYMMDD de nacimiento)
+  if (!fechaNacimiento) {
+    for (const l of lineas) {
+      const mrzL = l.replace(/\s+/g, '');
+      const matchMrz2 = mrzL.match(/^(\d{6})\d[MF]\d{6}/);
+      if (matchMrz2 && matchMrz2[1]) {
+        const yymmdd = matchMrz2[1];
+        const yy = yymmdd.substring(0, 2);
+        const mm = yymmdd.substring(2, 4);
+        const dd = yymmdd.substring(4, 6);
+        const anioFull = parseInt(yy, 10) > 30 ? `19${yy}` : `20${yy}`;
+        fechaNacimiento = `${dd}/${mm}/${anioFull}`;
+        break;
+      }
+    }
+  }
+
+  // Estrategia C: Buscar en texto filtrando explícitamente líneas de expedición/expiración
+  if (!fechaNacimiento) {
+    const lineasFiltradasSinExpedicion = lineas.filter(
+      (l) => !l.includes('EXPEDICION') && !l.includes('EXPIRACION') && !l.includes('VENCIMIENTO') && !l.includes('EMISION') && !l.includes('EXPIR') && !l.includes('EXPED')
+    );
+    fechaNacimiento = parsearFechaString(lineasFiltradasSinExpedicion.join('\n'));
   }
 
   // -------------------------------------------------------------
