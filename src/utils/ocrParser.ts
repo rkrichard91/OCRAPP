@@ -43,8 +43,8 @@ const PALABRAS_RESERVADAS = new Set([
   'MASCULINO', 'FEMENINO', 'HOMBRE', 'MUJER', 'ECUATORIANA', 'ECUATORIANO', 'ECU',
   'SOLTERO', 'CASADO', 'DIVORCIADO', 'VIUDO', 'UNION', 'HECHO', 'DIRECTOR', 'GOBIERNO',
   'SECCIONAL', 'BASICA', 'ESTUDIANTE', 'SUPERIOR', 'AUTONOMO', 'CORP', 'REG',
-  'CONYUGE', 'CONVIVIENTE', 'ESPOSO', 'ESPOSA', 'CIUDADANA', 'CIUDADANLA', 'EMISION',
-  'TIPO', 'SANGRE', 'FACTOR', 'RH'
+  'CONYUGE', 'CONVIVIENTE', 'ESPOSO', 'ESPOSA', 'CIUDADANA', 'CIUDADANLA', 'CIUDADAMIA',
+  'CIUDADAN1A', 'CIUDADANLA', 'CONDIC1ON', 'EMISION', 'TIPO', 'SANGRE', 'FACTOR', 'RH'
 ]);
 
 /**
@@ -117,10 +117,6 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
 
   // -------------------------------------------------------------
   // 1. NÚMERO DE CÉDULA (DOCUMENTO NUI)
-  // Formatos soportados:
-  // - Formato 1 (Biométrica Digital): "NUI.1350827596" o "NUI 1723454961"
-  // - Formato 2 (Niño/Adolescente): "No. 1756057459"
-  // - Formato 3 (Plástica con Chip): "No. 092168471-8"
   // -------------------------------------------------------------
   let numeroCedulaEncontrado: string | null = null;
   let esValido = false;
@@ -205,10 +201,7 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
 
   // -------------------------------------------------------------
   // 2. CÓDIGO DACTILAR
-  // Formatos en reverso:
-  // - Formato 1: "CÓDIGO DACTILAR: V4444V4444"
-  // - Formato 2: "E3343I2222" (Aislado en la esquina superior derecha)
-  // - Formato 3: "V4333V2242" (Aislado en la esquina superior derecha)
+  // Formatos en reverso: V4444V4444, E3343I2222, V4333V2242 (10 caracteres exactos)
   // -------------------------------------------------------------
   let codigoDactilarEncontrado: string | null = null;
   const regexDactilarEstandar = /\b[A-Z]\d{4}[A-Z]\d{4}\b/g;
@@ -221,7 +214,7 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
     const matchEtiqueta = textoUpper.match(regexEtiqueta);
     if (matchEtiqueta && matchEtiqueta[1]) {
       const posibleDactilar = matchEtiqueta[1].replace(/\s+/g, '');
-      if (posibleDactilar.length === 10) {
+      if (posibleDactilar.length === 10 && /\d{4}/.test(posibleDactilar)) {
         let dactilarFormateado = posibleDactilar;
         if (/\d/.test(dactilarFormateado[0])) {
           dactilarFormateado = 'V' + dactilarFormateado.substring(1);
@@ -230,8 +223,6 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
           dactilarFormateado = dactilarFormateado.substring(0, 5) + 'I' + dactilarFormateado.substring(6);
         }
         codigoDactilarEncontrado = dactilarFormateado;
-      } else if (/^[A-Z0-9]{8,10}$/.test(posibleDactilar)) {
-        codigoDactilarEncontrado = posibleDactilar;
       }
     }
   }

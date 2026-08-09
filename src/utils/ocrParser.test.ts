@@ -217,7 +217,30 @@ const resReversoSinMRZ = procesarTextoOCR(ocrReversoSinMRZ);
 assert(resReversoSinMRZ.primerApellido !== 'CONYUGE' && resReversoSinMRZ.primerApellido !== 'CÓNYUGE', 'Reverso sin MRZ: 1er Apellido NO debe ser CÓNYUGE');
 assert(resReversoSinMRZ.nombres !== 'CONVIVIENTE', 'Reverso sin MRZ: Nombres NO deben ser CONVIVIENTE');
 
+// 12. TEST: Formato 1 con error OCR CIUDADAMIA en lugar de CIUDADANIA y DACTILAR1
+const ocrFormato1ConTypo = `
+  REPÚBLICA DEL ECUADOR
+  CÉDULA DE IDENTIDAD
+  APELLIDOS CONDICIÓN CIUDADAMIA
+  ANDRADE
+  CORNEJO
+  NOMBRES
+  JERRY YUNIOR
+  NACIONALIDAD ECUATORIANA
+  FECHA DE NACIMIENTO 02 SEP 1996
+  SEXO HOMBRE
+  NUI.1350827596
+  CODIGO DACTILAR 1
+`;
+const resF1Typo = procesarTextoOCR(ocrFormato1ConTypo);
+assert(resF1Typo.numeroDocumento === '1350827596', 'F1 Typo: Debe extraer NUI.1350827596');
+assert(resF1Typo.primerApellido === 'ANDRADE', 'F1 Typo: 1er Apellido debe ser ANDRADE (no CIUDADAMIA)');
+assert(resF1Typo.segundoApellido === 'CORNEJO', 'F1 Typo: 2do Apellido debe ser CORNEJO');
+assert(resF1Typo.nombres === 'JERRY YUNIOR', 'F1 Typo: Nombres deben ser JERRY YUNIOR');
+assert(resF1Typo.codigoDactilar !== 'DACTILAR1', 'F1 Typo: Dactilar NO debe ser DACTILAR1');
+
 console.log('--- ALL TESTS COMPLETED SUCCESSFULLY! ---');
+
 
 
 
