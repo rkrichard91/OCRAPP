@@ -2,20 +2,62 @@ import { DatosCedula } from '../types/cedula';
 import { validarCedulaEcuatoriana } from './ecuadorianIdValidator';
 
 /**
- * Corrige errores comunes de OCR en cadenas numéricas (ej. O -> 0, I -> 1, S -> 5)
+ * Corrige errores comunes de OCR en cadenas numéricas (ej. O -> 0, I/l/| -> 1, S -> 5, etc.)
  */
 function corregirNumerosOCR(texto: string): string {
   return texto
-    .replace(/[O|o|Q]/g, '0')
-    .replace(/[I|l|1]/g, '1')
+    .replace(/[O|o|Q|D]/g, '0')
+    .replace(/[I|l|1|\||\!]/g, '1')
     .replace(/[Z|z]/g, '2')
+    .replace(/[E|e]/g, '3')
+    .replace(/[A|a]/g, '4')
     .replace(/[S|s]/g, '5')
-    .replace(/[B]/g, '8');
+    .replace(/[G|g|b]/g, '6')
+    .replace(/[T|t]/g, '7')
+    .replace(/[B]/g, '8')
+    .replace(/[q]/g, '9');
 }
 
 /**
+ * Palabras estáticas reservadas presentes en los 3 formatos de cédula ecuatoriana
+ * que no deben considerarse como apellidos o nombres del titular.
+ */
+const PALABRAS_RESERVADAS = new Set([
+  'REPUBLICA', 'DEL', 'ECUADOR', 'CEDULA', 'CIUDADANIA', 'IDENTIDAD', 'CIUDADANO',
+  'NINO', 'NINA', 'ADOLESCENTE', 'REGISTRO', 'CIVIL', 'IDENTIFICACION', 'CEDULACION',
+  'DIRECCION', 'GENERAL', 'INSTITUTO', 'FIRMA', 'TITULAR', 'FECHA', 'NACIMIENTO',
+  'EXPEDICION', 'EXPIRACION', 'VENCIMIENTO', 'VALIDEZ', 'LUGAR', 'PROVINCIA', 'CANTON',
+  'PARROQUIA', 'ESTADO', 'CIVIL', 'PROFESION', 'OCUPACION', 'INSTRUCCION', 'CONDICION',
+  'DONANTE', 'SEXO', 'NACIONALIDAD', 'NUI', 'NO', 'NUMERO', 'DOCUMENTO', 'CODIGO',
+  'DACTILAR', 'COD', 'APELLIDO', 'APELLIDOS', 'NOMBRE', 'NOMBRES', 'PADRE', 'MADRE',
+  'MASCULINO', 'FEMENINO', 'HOMBRE', 'MUJER', 'ECUATORIANA', 'ECUATORIANO', 'ECU',
+  'SOLTERO', 'CASADO', 'DIVORCIADO', 'VIUDO', 'UNION', 'HECHO', 'DIRECTOR', 'GOBIERNO',
+  'SECCIONAL', 'BASICA', 'ESTUDIANTE', 'SUPERIOR', 'AUTONOMO'
+]);
+
+/**
+ * Filtra palabras ruidosas o etiquetas estáticas para aislar nombres y apellidos.
+ */
+function limpiarNombre(texto: string): string {
+  return texto
+    .replace(/[^A-Z\sÑÁÉÍÓÚ]/gi, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 2 && !PALABRAS_RESERVADAS.has(w.toUpperCase()))
+    .join(' ')
+    .trim();
+}
+
+/**
+ * Convierte nombres de mes en español a su número de 2 dígitos.
+ */
+const MESES_MAP: Record<string, string> = {
+  ENE: '01', FEB: '02', MAR: '03', ABR: '04', MAY: '05', JUN: '06',
+  JUL: '07', AGO: '08', SEP: '09', OCT: '10', NOV: '11', DIC: '12'
+};
+
+/**
  * Procesa el texto plano retornado por el motor de OCR y extrae los 8 campos
- * de la cédula ecuatoriana con normalización y validación matemática.
+ * de los 3 formatos de cédula ecuatoriana vigentes.
  *
  * @param textoCrudo Texto reconocido por el motor de OCR
  * @returns Objeto DatosCedula con los 8 parámetros parseados y su validez
@@ -41,45 +83,68 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
   const lineas = textoUpper.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 
   // -------------------------------------------------------------
-  // 1. NÚMERO DE CÉDULA (DOCUMENTO)
+  // 1. NÚMERO DE CÉDULA (DOCUMENTO NUI)
+  // Formatos soportados:
+  // - Formato 1 (Biométrica Digital): "NUI.1723454961" o "No. DOCUMENTO 049101218"
+  // - Formato 2 (Niño/Adolescente): "No. 1756057459"
+  // - Formato 3 (Plástica con Chip): "No. 092168471-8" (guión antes del verificador)
   // -------------------------------------------------------------
   let numeroCedulaEncontrado: string | null = null;
   let esValido = false;
 
-  const regexCedulaDirecta = /\b\d{10}\b/g;
-  const matchesDirectos = textoUpper.match(regexCedulaDirecta) || [];
-
-  for (const candidato of matchesDirectos) {
-    const res = validarCedulaEcuatoriana(candidato);
-    if (res.esValido) {
-      numeroCedulaEncontrado = candidato;
-      esValido = true;
-      break;
+  // A. Coincidencia directa con guión o sufijo (ej. 092168471-8 -> 0921684718)
+  const matchesConGuion = textoUpper.match(/\b\d{9}[-.]?\d\b/g) || [];
+  for (const match of matchesConGuion) {
+    const candidatoLimpio = match.replace(/[^\d]/g, '');
+    if (candidatoLimpio.length === 10) {
+      const res = validarCedulaEcuatoriana(candidatoLimpio);
+      if (res.esValido) {
+        numeroCedulaEncontrado = candidatoLimpio;
+        esValido = true;
+        break;
+      }
     }
   }
 
+  // B. Coincidencia tras prefijos NUI., NUI, No., Nº, CEDULA
   if (!numeroCedulaEncontrado) {
-    const bloques = textoUpper.replace(/[\n\r]/g, ' ').split(/\s+/);
-    for (const bloque of bloques) {
-      const bloqueLimpio = bloque.replace(/[^\w]/g, '');
-      if (bloqueLimpio.length === 10) {
-        const candidatoCorregido = corregirNumerosOCR(bloqueLimpio);
-        if (/^\d{10}$/.test(candidatoCorregido)) {
-          const res = validarCedulaEcuatoriana(candidatoCorregido);
-          if (res.esValido) {
-            numeroCedulaEncontrado = candidatoCorregido;
-            esValido = true;
-            break;
-          }
+    const matchEtiquetaNui = textoUpper.match(/(?:NUI\.?|NO\.?|Nº|CEDULA|DOCUMENTO)\s*[:.-]?\s*([0-9OIQILSZBGT\s.-]{9,15})/i);
+    if (matchEtiquetaNui && matchEtiquetaNui[1]) {
+      const candidatoLimpio = corregirNumerosOCR(matchEtiquetaNui[1].replace(/[^\w]/g, ''));
+      if (candidatoLimpio.length >= 10) {
+        const sub10 = candidatoLimpio.substring(0, 10);
+        const res = validarCedulaEcuatoriana(sub10);
+        if (res.esValido) {
+          numeroCedulaEncontrado = sub10;
+          esValido = true;
         }
       }
     }
   }
 
+  // C. Escanear en líneas MRZ (ej. I<ECU0491012184<<<<<1723454961 o IDECU0921684718<<<<<)
   if (!numeroCedulaEncontrado) {
-    const textoSoloDigitos = textoUpper.replace(/[^\d]/g, '');
-    for (let i = 0; i <= textoSoloDigitos.length - 10; i++) {
-      const subCadena = textoSoloDigitos.substring(i, i + 10);
+    const mrzDigitsMatches = textoUpper.match(/(?:ECU|IDECU)([0-9OIQILSZBGT]{10})/g) || [];
+    for (const mrzMatch of mrzDigitsMatches) {
+      const digitos = mrzMatch.replace(/^(?:ECU|IDECU)/, '');
+      const candidatoCorregido = corregirNumerosOCR(digitos);
+      const res = validarCedulaEcuatoriana(candidatoCorregido);
+      if (res.esValido) {
+        numeroCedulaEncontrado = candidatoCorregido;
+        esValido = true;
+        break;
+      }
+    }
+  }
+
+  // D. Barrido de ventana deslizante sobre texto completo corrigiendo caracteres ambiguos
+  if (!numeroCedulaEncontrado) {
+    const textoLimpiado = textoUpper.replace(/[^A-Z0-9]/g, '');
+    const textoCorregido = corregirNumerosOCR(textoLimpiado);
+    const soloDigitos = textoCorregido.replace(/[^\d]/g, '');
+
+    for (let i = 0; i <= soloDigitos.length - 10; i++) {
+      const subCadena = soloDigitos.substring(i, i + 10);
       const res = validarCedulaEcuatoriana(subCadena);
       if (res.esValido) {
         numeroCedulaEncontrado = subCadena;
@@ -91,19 +156,32 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
 
   // -------------------------------------------------------------
   // 2. CÓDIGO DACTILAR
+  // Formatos en reverso:
+  // - Formato 1: "CÓDIGO DACTILAR: V4444V4444"
+  // - Formato 2: "E3343I2222" (Aislado en la esquina superior derecha)
+  // - Formato 3: "V4333V2242" (Aislado en la esquina superior derecha)
   // -------------------------------------------------------------
   let codigoDactilarEncontrado: string | null = null;
-  const regexDactilarEstandar = /\b[A-Z]\d{4}[A-Z]\d{4}\b/;
-  const matchDactilarDirecto = textoUpper.match(regexDactilarEstandar);
+  const regexDactilarEstandar = /\b[A-Z]\d{4}[A-Z]\d{4}\b/g;
+  const matchesDactilar = textoUpper.match(regexDactilarEstandar) || [];
 
-  if (matchDactilarDirecto) {
-    codigoDactilarEncontrado = matchDactilarDirecto[0];
+  if (matchesDactilar.length > 0) {
+    codigoDactilarEncontrado = matchesDactilar[0];
   } else {
-    const regexEtiqueta = /(?:DACTILAR|CODIGO|CÓDIGO|COD)\s*[:.-]?\s*([A-Z0-9]{8,10})/i;
+    const regexEtiqueta = /(?:DACTILAR|CODIGO|CÓDIGO|COD)\s*[:.-]?\s*([A-Z0-9\s]{8,12})/i;
     const matchEtiqueta = textoUpper.match(regexEtiqueta);
     if (matchEtiqueta && matchEtiqueta[1]) {
-      const posibleDactilar = matchEtiqueta[1];
-      if (/^[A-Z0-9]{8,10}$/.test(posibleDactilar)) {
+      const posibleDactilar = matchEtiqueta[1].replace(/\s+/g, '');
+      if (posibleDactilar.length === 10) {
+        let dactilarFormateado = posibleDactilar;
+        if (/\d/.test(dactilarFormateado[0])) {
+          dactilarFormateado = 'V' + dactilarFormateado.substring(1);
+        }
+        if (/\d/.test(dactilarFormateado[5])) {
+          dactilarFormateado = dactilarFormateado.substring(0, 5) + 'I' + dactilarFormateado.substring(6);
+        }
+        codigoDactilarEncontrado = dactilarFormateado;
+      } else if (/^[A-Z0-9]{8,10}$/.test(posibleDactilar)) {
         codigoDactilarEncontrado = posibleDactilar;
       }
     }
@@ -116,61 +194,122 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
   let segundoApellido: string | null = null;
   let nombres: string | null = null;
 
-  // Estrategia A: MRZ (Machine Readable Zone en reverso de cédula biométrica)
-  // Ejemplo: PEREZ<GOMEZ<<JUAN<CARLOS<<<<<<<<<<
-  const lineaMrzNombres = lineas.find((l) => l.includes('<<') && /^[A-Z<]+$/.test(l));
-  if (lineaMrzNombres) {
-    const partesMrz = lineaMrzNombres.split('<<');
+  // Estrategia A: MRZ Zone (Línea 3 de cédulas biométricas y plásticas)
+  // Ejemplos: BELTRAN<IZA<<ANTHONY<FABRICIO< o AVILA<MANRIQUE<<BETSY<MARIETTA
+  const lineasMrzNombres = lineas.filter((l) => l.includes('<<') && /^[A-Z<]+$/.test(l));
+  for (const lineaMrz of lineasMrzNombres) {
+    const partesMrz = lineaMrz.split('<<');
     if (partesMrz.length >= 2) {
       const apellidosParte = partesMrz[0].replace(/</g, ' ').trim().split(/\s+/);
-      if (apellidosParte.length >= 1) primerApellido = apellidosParte[0];
-      if (apellidosParte.length >= 2) segundoApellido = apellidosParte[1];
-      nombres = partesMrz[1].replace(/</g, ' ').trim();
+      const nombresParte = partesMrz[1].replace(/</g, ' ').trim();
+      if (apellidosParte.length >= 1 && nombresParte.length >= 2) {
+        primerApellido = apellidosParte[0];
+        if (apellidosParte.length >= 2) segundoApellido = apellidosParte[1];
+        nombres = nombresParte;
+        break;
+      }
     }
   }
 
-  // Estrategia B: Etiquetas explícitas (APELLIDOS / NOMBRES)
+  // Estrategia B: Lectura de Formato 2 y 3 (Etiqueta "APELLIDOS Y NOMBRES" seguida de 2 líneas)
   if (!primerApellido || !nombres) {
     for (let i = 0; i < lineas.length; i++) {
       const linea = lineas[i];
 
-      // APELLIDOS
-      if (linea.includes('APELLIDO') || linea.includes('APELLIDOS')) {
-        const textoApellidos = linea.replace(/.*APELLIDOS?\s*[:.-]?\s*/i, '').trim();
-        const listaApellidos = (textoApellidos || (lineas[i + 1] || '')).split(/\s+/);
-        if (listaApellidos.length >= 1 && listaApellidos[0].length > 1) {
-          primerApellido = listaApellidos[0];
-        }
-        if (listaApellidos.length >= 2 && listaApellidos[1].length > 1) {
-          segundoApellido = listaApellidos[1];
-        }
+      // Ignorar líneas pertenecientes a PADRE o MADRE
+      if (linea.includes('PADRE') || linea.includes('MADRE')) {
+        continue;
       }
 
-      // NOMBRES
-      if (linea.includes('NOMBRE') || linea.includes('NOMBRES')) {
-        const textoNombres = linea.replace(/.*NOMBRES?\s*[:.-]?\s*/i, '').trim();
-        nombres = textoNombres || (lineas[i + 1] || '').trim();
+      if (linea.includes('APELLIDOS Y NOMBRES') || (linea.includes('APELLIDOS') && linea.includes('NOMBRES'))) {
+        const textoEnMismaLinea = limpiarNombre(linea.replace(/.*(?:APELLIDOS\s*Y\s*NOMBRES|NOMBRES\s*Y\s*APELLIDOS)\s*[:.-]?\s*/i, ''));
+        
+        if (textoEnMismaLinea) {
+          const palabras = textoEnMismaLinea.split(/\s+/);
+          if (palabras.length >= 3) {
+            primerApellido = palabras[0];
+            segundoApellido = palabras[1];
+            nombres = palabras.slice(2).join(' ');
+          } else if (palabras.length === 2) {
+            primerApellido = palabras[0];
+            nombres = palabras[1];
+          }
+        } else {
+          // El texto de los apellidos está en la siguiente línea i+1, y nombres en i+2
+          if (i + 1 < lineas.length) {
+            const lineaApellidos = limpiarNombre(lineas[i + 1]);
+            const palabrasAp = lineaApellidos.split(/\s+/).filter(Boolean);
+            if (palabrasAp.length >= 1) primerApellido = palabrasAp[0];
+            if (palabrasAp.length >= 2) segundoApellido = palabrasAp[1];
+          }
+          if (i + 2 < lineas.length) {
+            const lineaNombres = limpiarNombre(lineas[i + 2]);
+            if (lineaNombres && !lineaNombres.includes('LUGAR') && !lineaNombres.includes('NACIMIENTO')) {
+              nombres = lineaNombres;
+            }
+          }
+        }
+        break;
+      }
+
+      // Lectura de Formato 1 ("APELLIDOS" y "NOMBRES" en etiquetas separadas)
+      if (!primerApellido && (linea.includes('APELLIDOS') || linea === 'APELLIDOS')) {
+        let textoAp = limpiarNombre(linea.replace(/.*APELLIDOS\s*[:.-]?\s*/i, ''));
+        if (!textoAp && i + 1 < lineas.length) {
+          textoAp = limpiarNombre(lineas[i + 1]);
+          if (!segundoApellido && i + 2 < lineas.length && !lineas[i + 2].includes('NOMBRES')) {
+            const linea2 = limpiarNombre(lineas[i + 2]);
+            if (linea2) textoAp += ' ' + linea2;
+          }
+        }
+        const listaAp = textoAp.split(/\s+/).filter(Boolean);
+        if (listaAp.length >= 1) primerApellido = listaAp[0];
+        if (listaAp.length >= 2) segundoApellido = listaAp[1];
+      }
+
+      if (!nombres && (linea.includes('NOMBRES') || linea === 'NOMBRES')) {
+        let textoNom = limpiarNombre(linea.replace(/.*NOMBRES\s*[:.-]?\s*/i, ''));
+        if (!textoNom && i + 1 < lineas.length) {
+          textoNom = limpiarNombre(lineas[i + 1]);
+        }
+        if (textoNom) nombres = textoNom;
       }
     }
   }
 
   // -------------------------------------------------------------
   // 4. FECHA DE NACIMIENTO
-  // Formatos: DD/MM/AAAA, DD-MM-AAAA, DD MMM YYYY, YYYY/MM/DD
+  // Formatos en los 3 documentos:
+  // - Formato 1: "01 JUN 1996" (DD MMM YYYY)
+  // - Formato 2: "2002-02-05" (YYYY-MM-DD)
+  // - Formato 3: "1982-09-01" (YYYY-MM-DD)
+  // - Formato Estándar: "15/04/1990" (DD/MM/YYYY)
   // -------------------------------------------------------------
   let fechaNacimiento: string | null = null;
-  const regexFechaNumerica = /\b(0[1-9]|[12][0-9]|3[01])[\/\.-](0[1-9]|1[012])[\/\.-](19|20)\d{2}\b/;
-  const matchFecha = textoUpper.match(regexFechaNumerica);
+  const textoNormalizadoFechas = textoUpper.replace(/(\d{2,4})[\|I!l\.](\d{2})[\|I!l\.](\d{2,4})/g, '$1/$2/$3');
 
-  if (matchFecha) {
-    fechaNacimiento = matchFecha[0];
-  } else {
-    // Buscar con meses en texto (ej. 15 ABR 1990)
-    const regexFechaTexto = /\b(0[1-9]|[12][0-9]|3[01])\s+(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\s+(19|20)\d{2}\b/;
-    const matchFechaTexto = textoUpper.match(regexFechaTexto);
-    if (matchFechaTexto) {
-      fechaNacimiento = matchFechaTexto[0];
-    }
+  // A. Formato YYYY-MM-DD o YYYY/MM/DD
+  const regexFechaISO = /\b(19|20)\d{2}[\/\.-](0[1-9]|1[012])[\/\.-](0[1-9]|[12][0-9]|3[01])\b/;
+  const matchISO = textoNormalizadoFechas.match(regexFechaISO);
+
+  // B. Formato DD/MM/YYYY
+  const regexFechaDDMM = /\b(0[1-9]|[12][0-9]|3[01])[\/\.-](0[1-9]|1[012])[\/\.-](19|20)\d{2}\b/;
+  const matchDDMM = textoNormalizadoFechas.match(regexFechaDDMM);
+
+  // C. Formato DD MMM YYYY (ej. 01 JUN 1996)
+  const regexFechaTexto = /\b(0[1-9]|[12][0-9]|3[01])\s+(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\s+(19|20)\d{2}\b/;
+  const matchTexto = textoNormalizadoFechas.match(regexFechaTexto);
+
+  if (matchDDMM) {
+    fechaNacimiento = matchDDMM[0];
+  } else if (matchISO) {
+    // Convertir YYYY-MM-DD a DD/MM/YYYY para mantener formato consistente
+    const partes = matchISO[0].split(/[\/\.-]/);
+    fechaNacimiento = `${partes[2]}/${partes[1]}/${partes[0]}`;
+  } else if (matchTexto) {
+    const partes = matchTexto[0].split(/\s+/);
+    const mesNum = MESES_MAP[partes[1]] || '01';
+    fechaNacimiento = `${partes[0]}/${mesNum}/${partes[2]}`;
   }
 
   // -------------------------------------------------------------
@@ -188,21 +327,27 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
 
   // -------------------------------------------------------------
   // 6. SEXO / GÉNERO
+  // Formatos en los 3 documentos:
+  // - Formato 1: "SEXO HOMBRE" -> MASCULINO
+  // - Formato 2: "SEXO MUJER" -> FEMENINO
+  // - Formato 3: "SEXO F" / "SEXO M" -> FEMENINO / MASCULINO
   // -------------------------------------------------------------
   let sexo: string | null = null;
-  if (/\bSEXO\s*[:.-]?\s*(MASCULINO|FEMENINO|M|F|H)\b/.test(textoUpper)) {
-    const matchSexo = textoUpper.match(/\bSEXO\s*[:.-]?\s*(MASCULINO|FEMENINO|M|F|H)\b/);
+  if (/\bSEXO\s*[:.-]?\s*(MASCULINO|FEMENINO|HOMBRE|MUJER|M|F|H)\b/.test(textoUpper)) {
+    const matchSexo = textoUpper.match(/\bSEXO\s*[:.-]?\s*(MASCULINO|FEMENINO|HOMBRE|MUJER|M|F|H)\b/);
     if (matchSexo) {
       const val = matchSexo[1];
-      sexo = val === 'M' || val === 'H' || val === 'MASCULINO' ? 'MASCULINO' : 'FEMENINO';
+      if (val === 'MASCULINO' || val === 'HOMBRE' || val === 'M' || val === 'H') {
+        sexo = 'MASCULINO';
+      } else if (val === 'FEMENINO' || val === 'MUJER' || val === 'F') {
+        sexo = 'FEMENINO';
+      }
     }
-  } else if (/\b(MASCULINO|FEMENINO)\b/.test(textoUpper)) {
-    sexo = textoUpper.includes('MASCULINO') ? 'MASCULINO' : 'FEMENINO';
-  } else {
-    // Buscar indicador de género en MRZ (ej. 9004155M3008254ECU)
-    const matchMrzSexo = textoUpper.match(/\d{6}\d[MF]\d{7}/);
-    if (matchMrzSexo) {
-      sexo = matchMrzSexo[0].includes('M') ? 'MASCULINO' : 'FEMENINO';
+  } else if (/\b(MASCULINO|FEMENINO|HOMBRE|MUJER)\b/.test(textoUpper)) {
+    if (textoUpper.includes('MASCULINO') || textoUpper.includes('HOMBRE')) {
+      sexo = 'MASCULINO';
+    } else if (textoUpper.includes('FEMENINO') || textoUpper.includes('MUJER')) {
+      sexo = 'FEMENINO';
     }
   }
 
@@ -233,3 +378,5 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
     rawText: textoCrudo,
   };
 }
+
+

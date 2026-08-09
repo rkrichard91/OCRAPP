@@ -6,11 +6,23 @@ import { DatosCedula } from './types/cedula';
 
 export function App() {
   const [modoEscaneo, setModoEscaneo] = useState(false);
+  const [abrirGaleriaAuto, setAbrirGaleriaAuto] = useState(false);
   const [resultadoFinal, setResultadoFinal] = useState<DatosCedula | null>(null);
 
   const handleScanSuccess = (datos: DatosCedula) => {
     setResultadoFinal(datos);
     setModoEscaneo(false);
+    setAbrirGaleriaAuto(false);
+  };
+
+  const handleIniciarCamara = () => {
+    setAbrirGaleriaAuto(false);
+    setModoEscaneo(true);
+  };
+
+  const handleIniciarGaleria = () => {
+    setAbrirGaleriaAuto(true);
+    setModoEscaneo(true);
   };
 
   const generarTextoFormateado = (datos: DatosCedula): string => {
@@ -39,7 +51,11 @@ export function App() {
         <StatusBar barStyle="light-content" backgroundColor="#000000" />
         <OcrScanner
           onScanSuccess={handleScanSuccess}
-          onCancel={() => setModoEscaneo(false)}
+          onCancel={() => {
+            setModoEscaneo(false);
+            setAbrirGaleriaAuto(false);
+          }}
+          autoOpenGallery={abrirGaleriaAuto}
         />
       </SafeAreaView>
     );
@@ -109,13 +125,23 @@ export function App() {
             </View>
           )}
 
-          <TouchableOpacity
-            style={styles.scanButton}
-            onPress={() => setModoEscaneo(true)}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.scanButtonText}>📷 Iniciar Escáner de Cédula</Text>
-          </TouchableOpacity>
+          <View style={styles.buttonGroup}>
+            <TouchableOpacity
+              style={styles.scanButton}
+              onPress={handleIniciarCamara}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.scanButtonText}>📷 Escanear con Cámara</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.galleryButton}
+              onPress={handleIniciarGaleria}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.galleryButtonText}>🖼️ Escanear desde Imagen / Archivo</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -229,6 +255,9 @@ const styles = StyleSheet.create({
     marginTop: 10,
     textAlign: 'center',
   },
+  buttonGroup: {
+    gap: 12,
+  },
   scanButton: {
     backgroundColor: '#2563EB',
     borderRadius: 14,
@@ -236,6 +265,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   scanButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  galleryButton: {
+    backgroundColor: '#7C3AED',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  galleryButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
