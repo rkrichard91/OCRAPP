@@ -2,6 +2,16 @@ import { DatosCedula } from '../types/cedula';
 import { validarCedulaEcuatoriana } from './ecuadorianIdValidator';
 
 /**
+ * Normaliza una cadena quitando tildes, diéresis y convirtiendo a mayúsculas
+ */
+function normalizarTexto(texto: string): string {
+  return texto
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase();
+}
+
+/**
  * Corrige errores comunes de OCR en cadenas numéricas (ej. O -> 0, I/l/| -> 1, S -> 5, etc.)
  */
 function corregirNumerosOCR(texto: string): string {
@@ -32,7 +42,9 @@ const PALABRAS_RESERVADAS = new Set([
   'DACTILAR', 'COD', 'APELLIDO', 'APELLIDOS', 'NOMBRE', 'NOMBRES', 'PADRE', 'MADRE',
   'MASCULINO', 'FEMENINO', 'HOMBRE', 'MUJER', 'ECUATORIANA', 'ECUATORIANO', 'ECU',
   'SOLTERO', 'CASADO', 'DIVORCIADO', 'VIUDO', 'UNION', 'HECHO', 'DIRECTOR', 'GOBIERNO',
-  'SECCIONAL', 'BASICA', 'ESTUDIANTE', 'SUPERIOR', 'AUTONOMO'
+  'SECCIONAL', 'BASICA', 'ESTUDIANTE', 'SUPERIOR', 'AUTONOMO',
+  'CONYUGE', 'CONVIVIENTE', 'ESPOSO', 'ESPOSA', 'CIUDADANA', 'CIUDADANLA', 'EMISION',
+  'TIPO', 'SANGRE', 'FACTOR', 'RH'
 ]);
 
 /**
@@ -42,9 +54,30 @@ function limpiarNombre(texto: string): string {
   return texto
     .replace(/[^A-Z\sÑÁÉÍÓÚ]/gi, ' ')
     .split(/\s+/)
-    .filter((w) => w.length >= 2 && !PALABRAS_RESERVADAS.has(w.toUpperCase()))
+    .filter((w) => {
+      const wNorm = normalizarTexto(w);
+      return wNorm.length >= 2 && !PALABRAS_RESERVADAS.has(wNorm);
+    })
     .join(' ')
     .trim();
+}
+
+/**
+ * Determina si una línea pertenece a familiares (Padre, Madre, Cónyuge/Conviviente)
+ * o metadatos del reverso que no deben ser interpretados como nombres del titular.
+ */
+function esLineaFamiliarOInvalida(linea: string): boolean {
+  const norm = normalizarTexto(linea);
+  return (
+    norm.includes('PADRE') ||
+    norm.includes('MADRE') ||
+    norm.includes('CONYUGE') ||
+    norm.includes('CONVIVIENTE') ||
+    norm.includes('ESPOSO') ||
+    norm.includes('ESPOSA') ||
+    norm.includes('EMISION') ||
+    norm.includes('DIRECTOR')
+  );
 }
 
 /**
@@ -195,29 +228,26 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
   let nombres: string | null = null;
 
   // Estrategia A: MRZ Zone (Línea 3 de cédulas biométricas y plásticas)
-  // Ejemplos: BELTRAN<IZA<<ANTHONY<FABRICIO< o AVILA<MANRIQUE<<BETSY<MARIETTA
-  const lineasMrzNombres = lineas.filter((l) => l.includes('<<') && /^[A-Z<]+$/.test(l));
-  for (const lineaMrz of lineasMrzNombres) {
-    const partesMrz = lineaMrz.split('<<');
-    if (partesMrz.length >= 2) {
-      const apellidosParte = partesMrz[0].replace(/</g, ' ').trim().split(/\s+/);
-      const nombresParte = partesMrz[1].replace(/</g, ' ').trim();
-      if (apellidosParte.length >= 1 && nombresParte.length >= 2) {
-        primerApellido = apellidosParte[0];
-        if (apellidosParte.length >= 2) segundoApellido = apellidosParte[1];
-        nombres = nombresParte;
-        break;
-      }
+  // Ejemplos: BELTRAN<IZA<<ANTHONY<FABRICIO< o AVILA<MANRIQUE<<BETSY<MARIETTA o ANDRADE<CORNEJO<<JERRY<YUNIOR<
+  const matchMrzNombres = textoUpper.match(/([A-Z]+(?:<[A-Z]+)*)<<([A-Z]+(?:<[A-Z]+)*)/);
+  if (matchMrzNombres) {
+    const apellidosStr = matchMrzNombres[1].replace(/</g, ' ').trim();
+    const nombresStr = matchMrzNombres[2].replace(/</g, ' ').trim();
+    const apellidosParte = apellidosStr.split(/\s+/).filter(Boolean);
+    if (apellidosParte.length >= 1 && nombresStr.length >= 2) {
+      primerApellido = apellidosParte[0];
+      if (apellidosParte.length >= 2) segundoApellido = apellidosParte[1];
+      nombres = nombresStr;
     }
   }
 
-  // Estrategia B: Lectura de Formato 2 y 3 (Etiqueta "APELLIDOS Y NOMBRES" seguida de 2 líneas)
+  // Estrategia B: Lectura de etiquetas "APELLIDOS Y NOMBRES" excluyendo datos de Padre, Madre, Cónyuge o Conviviente
   if (!primerApellido || !nombres) {
     for (let i = 0; i < lineas.length; i++) {
       const linea = lineas[i];
 
-      // Ignorar líneas pertenecientes a PADRE o MADRE
-      if (linea.includes('PADRE') || linea.includes('MADRE')) {
+      // Ignorar líneas pertenecientes a PADRE, MADRE, CÓNYUGE, CONVIVIENTE, EMISIÓN, DIRECTOR
+      if (esLineaFamiliarOInvalida(linea)) {
         continue;
       }
 
@@ -236,13 +266,13 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
           }
         } else {
           // El texto de los apellidos está en la siguiente línea i+1, y nombres en i+2
-          if (i + 1 < lineas.length) {
+          if (i + 1 < lineas.length && !esLineaFamiliarOInvalida(lineas[i + 1])) {
             const lineaApellidos = limpiarNombre(lineas[i + 1]);
             const palabrasAp = lineaApellidos.split(/\s+/).filter(Boolean);
             if (palabrasAp.length >= 1) primerApellido = palabrasAp[0];
             if (palabrasAp.length >= 2) segundoApellido = palabrasAp[1];
           }
-          if (i + 2 < lineas.length) {
+          if (i + 2 < lineas.length && !esLineaFamiliarOInvalida(lineas[i + 2])) {
             const lineaNombres = limpiarNombre(lineas[i + 2]);
             if (lineaNombres && !lineaNombres.includes('LUGAR') && !lineaNombres.includes('NACIMIENTO')) {
               nombres = lineaNombres;
@@ -255,9 +285,9 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
       // Lectura de Formato 1 ("APELLIDOS" y "NOMBRES" en etiquetas separadas)
       if (!primerApellido && (linea.includes('APELLIDOS') || linea === 'APELLIDOS')) {
         let textoAp = limpiarNombre(linea.replace(/.*APELLIDOS\s*[:.-]?\s*/i, ''));
-        if (!textoAp && i + 1 < lineas.length) {
+        if (!textoAp && i + 1 < lineas.length && !esLineaFamiliarOInvalida(lineas[i + 1])) {
           textoAp = limpiarNombre(lineas[i + 1]);
-          if (!segundoApellido && i + 2 < lineas.length && !lineas[i + 2].includes('NOMBRES')) {
+          if (!segundoApellido && i + 2 < lineas.length && !lineas[i + 2].includes('NOMBRES') && !esLineaFamiliarOInvalida(lineas[i + 2])) {
             const linea2 = limpiarNombre(lineas[i + 2]);
             if (linea2) textoAp += ' ' + linea2;
           }
@@ -269,7 +299,7 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
 
       if (!nombres && (linea.includes('NOMBRES') || linea === 'NOMBRES')) {
         let textoNom = limpiarNombre(linea.replace(/.*NOMBRES\s*[:.-]?\s*/i, ''));
-        if (!textoNom && i + 1 < lineas.length) {
+        if (!textoNom && i + 1 < lineas.length && !esLineaFamiliarOInvalida(lineas[i + 1])) {
           textoNom = limpiarNombre(lineas[i + 1]);
         }
         if (textoNom) nombres = textoNom;

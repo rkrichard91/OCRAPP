@@ -174,7 +174,51 @@ const ocrConExpedicionYNacimiento = `
 const resFechas = procesarTextoOCR(ocrConExpedicionYNacimiento);
 assert(resFechas.fechaNacimiento === '15/04/1990', 'Debe extraer la Fecha de Nacimiento (15/04/1990) e ignorar la de expedición (2024-05-10)');
 
+// 10. TEST: Reverso con datos de Cónyuge/Conviviente y MRZ (Caso real del usuario)
+const ocrReversoConConyuge = `
+  APELLIDOS Y NOMBRES DEL PADRE
+  ANDRADE CEDEÑO BOLIVAR ANTONIO
+  APELLIDOS Y NOMBRES DE LA MADRE
+  CORNEJO CABAL BEATRIZ ALEXANDRA
+  ESTADO CIVIL
+  CASADO
+  APELLIDOS Y NOMBRES DEL CÓNYUGE O CONVIVIENTE
+  ACEBO ZAMBRANO DEYANIRA ALEJANDRA
+  LUGAR Y FECHA DE EMISIÓN
+  MANTA 28 JUN 2023
+  DIRECTOR GENERAL
+  CODIGO DACTILAR V4343V4444 TIPO SANGRE O+ DONANTE Si
+  I<ECU0584110913<<<<<<<<<<<<<<<1350827596
+  9609026M3306286ECU<SI<<<<<<<<<4
+  ANDRADE<CORNEJO<<JERRY<YUNIOR<
+`;
+const resReverso = procesarTextoOCR(ocrReversoConConyuge);
+assert(resReverso.numeroDocumento === '1350827596', 'Reverso con Cónyuge: Debe extraer cédula 1350827596');
+assert(resReverso.codigoDactilar === 'V4343V4444', 'Reverso con Cónyuge: Debe extraer código dactilar V4343V4444');
+assert(resReverso.primerApellido === 'ANDRADE', 'Reverso con Cónyuge: 1er Apellido debe ser ANDRADE');
+assert(resReverso.segundoApellido === 'CORNEJO', 'Reverso con Cónyuge: 2do Apellido debe ser CORNEJO');
+assert(resReverso.nombres === 'JERRY YUNIOR', 'Reverso con Cónyuge: Nombres deben ser JERRY YUNIOR (ignora CÓNYUGE O CONVIVIENTE)');
+
+// 11. TEST: Reverso sin MRZ excluye datos de Cónyuge o Conviviente
+const ocrReversoSinMRZ = `
+  APELLIDOS Y NOMBRES DEL PADRE
+  ANDRADE CEDEÑO BOLIVAR ANTONIO
+  APELLIDOS Y NOMBRES DE LA MADRE
+  CORNEJO CABAL BEATRIZ ALEXANDRA
+  ESTADO CIVIL
+  CASADO
+  APELLIDOS Y NOMBRES DEL CÓNYUGE O CONVIVIENTE
+  ACEBO ZAMBRANO DEYANIRA ALEJANDRA
+  LUGAR Y FECHA DE EMISIÓN
+  MANTA 28 JUN 2023
+  CODIGO DACTILAR V4343V4444
+`;
+const resReversoSinMRZ = procesarTextoOCR(ocrReversoSinMRZ);
+assert(resReversoSinMRZ.primerApellido !== 'CONYUGE' && resReversoSinMRZ.primerApellido !== 'CÓNYUGE', 'Reverso sin MRZ: 1er Apellido NO debe ser CÓNYUGE');
+assert(resReversoSinMRZ.nombres !== 'CONVIVIENTE', 'Reverso sin MRZ: Nombres NO deben ser CONVIVIENTE');
+
 console.log('--- ALL TESTS COMPLETED SUCCESSFULLY! ---');
+
 
 
 
