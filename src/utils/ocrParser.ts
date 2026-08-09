@@ -81,6 +81,83 @@ function esLineaFamiliarOInvalida(linea: string): boolean {
 }
 
 /**
+ * Valida si un token alfanumérico es un candidato legítimo de código dactilar.
+ */
+function esCandidatoDactilarValido(str: string): boolean {
+  if (str.length !== 10) return false;
+  // Si son 10 dígitos puros, es el NUI/Cédula, NO un dactilar
+  if (/^\d{10}$/.test(str)) return false;
+  // Descartar palabras de etiquetas
+  if (PALABRAS_RESERVADAS.has(str) || str.startsWith('DACTIL') || str.startsWith('CODIGO') || str.startsWith('REPUBL')) return false;
+
+  // Debe tener entre 5 y 9 dígitos y al menos 1 letra
+  const numLetras = (str.match(/[A-Z]/g) || []).length;
+  const numDigitos = (str.match(/\d/g) || []).length;
+  return numLetras >= 1 && numDigitos >= 5 && numDigitos <= 9;
+}
+
+/**
+ * Formatea un candidato a código dactilar asegurando que las posiciones 0 y 5 sean letras.
+ */
+function formatearDactilar(str: string): string {
+  let chars = str.split('');
+  if (/\d/.test(chars[0])) chars[0] = 'V';
+  if (/\d/.test(chars[5])) chars[5] = 'I';
+  return chars.join('');
+}
+
+/**
+ * Extrae el código dactilar de 10 caracteres analizando tokens y etiquetas de reverso.
+ */
+function extraerCodigoDactilar(textoUpper: string): string | null {
+  // A. Escanear tokens directos aislados en cualquier parte del texto
+  const tokens = textoUpper
+    .replace(/[^A-Z0-9\s-]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i].replace(/[^A-Z0-9]/g, '');
+
+    // Caso 1: Token de 10 caracteres exactos (ej. V4343V4444, E3343I2222, V4333V2242)
+    if (token.length === 10 && esCandidatoDactilarValido(token)) {
+      return formatearDactilar(token);
+    }
+
+    // Caso 2: Código dividido por espacio en 2 tokens de 5 caracteres (ej. "V4343" "V4444")
+    if (token.length === 5 && i + 1 < tokens.length) {
+      const tokenSig = tokens[i + 1].replace(/[^A-Z0-9]/g, '');
+      if (tokenSig.length === 5) {
+        const combinado = token + tokenSig;
+        if (esCandidatoDactilarValido(combinado)) {
+          return formatearDactilar(combinado);
+        }
+      }
+    }
+  }
+
+  // B. Buscar en la línea siguiente a etiquetas "DACTILAR" / "CÓDIGO DACTILAR"
+  const lineas = textoUpper.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  for (let i = 0; i < lineas.length; i++) {
+    const l = lineas[i];
+    if (l.includes('DACTILAR') || l.includes('CODIGO') || l.includes('CÓDIGO')) {
+      for (let j = i; j <= Math.min(i + 2, lineas.length - 1); j++) {
+        const lineaLimpia = lineas[j].replace(/.*(?:DACTILAR|CODIGO|CÓDIGO)\s*[:.-]?\s*/i, '');
+        const subTokens = lineaLimpia.replace(/[^A-Z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+        for (const st of subTokens) {
+          const stLimpio = st.replace(/[^A-Z0-9]/g, '');
+          if (stLimpio.length === 10 && esCandidatoDactilarValido(stLimpio)) {
+            return formatearDactilar(stLimpio);
+          }
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Convierte nombres de mes en español a su número de 2 dígitos.
  */
 const MESES_MAP: Record<string, string> = {
@@ -202,47 +279,7 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
   // 2. CÓDIGO DACTILAR
   // Formatos en reverso: V4343V4444, E3343I2222, V4333V2242 (10 caracteres exactos)
   // -------------------------------------------------------------
-  let codigoDactilarEncontrado: string | null = null;
-  const matchesDirectosDactilar = textoUpper.match(/\b[A-Z0-9]{4,5}\s*[A-Z0-9]{4,5}\b/g) || [];
-  
-  for (const match of matchesDirectosDactilar) {
-    const limpio = match.replace(/\s+/g, '');
-    // Si son 10 dígitos puros, es el NUI (cédula), NO un código dactilar
-    if (/^\d{10}$/.test(limpio)) continue;
-
-    if (limpio.length === 10 && !limpio.startsWith('DACTIL') && !limpio.startsWith('CODIGO')) {
-      const numDigitos = (limpio.match(/\d/g) || []).length;
-      if (numDigitos >= 6 && numDigitos <= 9) {
-        let dactilarFormateado = limpio;
-        if (/\d/.test(dactilarFormateado[0])) {
-          dactilarFormateado = 'V' + dactilarFormateado.substring(1);
-        }
-        if (/\d/.test(dactilarFormateado[5])) {
-          dactilarFormateado = dactilarFormateado.substring(0, 5) + 'I' + dactilarFormateado.substring(6);
-        }
-        codigoDactilarEncontrado = dactilarFormateado;
-        break;
-      }
-    }
-  }
-
-  if (!codigoDactilarEncontrado) {
-    const matchEtiqueta = textoUpper.match(/(?:DACTILAR|CODIGO|CÓDIGO|COD)\s*[:.-]?\s*([A-Z0-9\s]{8,14})/i);
-    if (matchEtiqueta && matchEtiqueta[1]) {
-      const candidato = matchEtiqueta[1].replace(/[^A-Z0-9]/g, '');
-      if (candidato.length >= 10 && !candidato.startsWith('DACTIL')) {
-        const sub10 = candidato.substring(0, 10);
-        let dactilarFormateado = sub10;
-        if (/\d/.test(dactilarFormateado[0])) {
-          dactilarFormateado = 'V' + dactilarFormateado.substring(1);
-        }
-        if (/\d/.test(dactilarFormateado[5])) {
-          dactilarFormateado = dactilarFormateado.substring(0, 5) + 'I' + dactilarFormateado.substring(6);
-        }
-        codigoDactilarEncontrado = dactilarFormateado;
-      }
-    }
-  }
+  let codigoDactilarEncontrado: string | null = extraerCodigoDactilar(textoUpper);
 
   // -------------------------------------------------------------
   // 3. APELLIDOS Y NOMBRES (1er Apellido, 2do Apellido, Nombres)
