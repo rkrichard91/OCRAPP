@@ -81,36 +81,88 @@ function esLineaFamiliarOInvalida(linea: string): boolean {
 }
 
 /**
- * Valida si un token alfanumérico es un candidato legítimo de código dactilar.
+ * Valida si una cadena alfanumérica de 10 caracteres es un candidato legítimo de Código Dactilar.
  */
-function esCandidatoDactilarValido(str: string): boolean {
+function esCandidatoDactilarFlex(str: string): boolean {
   if (str.length !== 10) return false;
-  // Si son 10 dígitos puros, es el NUI/Cédula, NO un dactilar
+  // Descartar 10 dígitos puros (es el NUI/Cédula)
   if (/^\d{10}$/.test(str)) return false;
-  // Descartar palabras de etiquetas
+  // Descartar palabras de etiquetas estáticas
   if (PALABRAS_RESERVADAS.has(str) || str.startsWith('DACTIL') || str.startsWith('CODIGO') || str.startsWith('REPUBL')) return false;
 
-  // Debe tener entre 5 y 9 dígitos y al menos 1 letra
-  const numLetras = (str.match(/[A-Z]/g) || []).length;
+  // Un código dactilar legítimo contiene entre 4 y 9 dígitos
   const numDigitos = (str.match(/\d/g) || []).length;
-  return numLetras >= 1 && numDigitos >= 5 && numDigitos <= 9;
+  return numDigitos >= 4 && numDigitos <= 9;
 }
 
 /**
- * Formatea un candidato a código dactilar asegurando que las posiciones 0 y 5 sean letras.
+ * Formatea un candidato a código dactilar (ej. V4343V4444, E3343I2222, V4333V2242)
+ * corrigiendo caracteres numéricos en posiciones 0 y 5 y asegurando números en el resto.
  */
-function formatearDactilar(str: string): string {
+function formatearDactilarFlex(str: string): string {
   let chars = str.split('');
+  // Posición 0 debe ser una Letra. Si el OCR leyó un número, corregir a 'V'
   if (/\d/.test(chars[0])) chars[0] = 'V';
+  // Posición 5 debe ser una Letra. Si el OCR leyó un número, corregir a 'I'
   if (/\d/.test(chars[5])) chars[5] = 'I';
+
+  // Para los dígitos en las posiciones 1..4 y 6..9, corregir erratas comunes de OCR (O->0, I->1, S->5, A->4, etc.)
+  for (let idx = 0; idx < 10; idx++) {
+    if (idx !== 0 && idx !== 5) {
+      if (/[A-Z]/i.test(chars[idx])) {
+        chars[idx] = corregirNumerosOCR(chars[idx]);
+      }
+    }
+  }
   return chars.join('');
+}
+
+/**
+ * Busca específicamente debajo de las líneas que contienen la palabra "DACTILAR" o "CÓDIGO"
+ */
+function buscarDactilarBajoEtiqueta(textoUpper: string): string | null {
+  const lineas = textoUpper.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+  for (let i = 0; i < lineas.length; i++) {
+    const l = lineas[i];
+
+    if (l.includes('DACTILAR') || l.includes('CODIGO') || l.includes('CÓDIGO')) {
+      // Escanear en la misma línea (después del texto de la etiqueta) y en las siguientes 3 líneas
+      for (let j = i; j <= Math.min(i + 3, lineas.length - 1); j++) {
+        const textoLinea = lineas[j]
+          .replace(/.*(?:DACTILAR|CODIGO|CÓDIGO|COD)\s*[:.-]?\s*/gi, '')
+          .trim();
+
+        // Extraer todos los caracteres alfanuméricos contiguos o separados por espacios/guiones
+        const soloAlfa = textoLinea.replace(/[^A-Z0-9]/g, '');
+
+        if (soloAlfa.length >= 10) {
+          // Ventana deslizante para encontrar los 10 caracteres del código
+          for (let k = 0; k <= soloAlfa.length - 10; k++) {
+            const candidato = soloAlfa.substring(k, k + 10);
+            if (esCandidatoDactilarFlex(candidato)) {
+              return formatearDactilarFlex(candidato);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 /**
  * Extrae el código dactilar de 10 caracteres analizando tokens y etiquetas de reverso.
  */
 function extraerCodigoDactilar(textoUpper: string): string | null {
-  // A. Escanear tokens directos aislados en cualquier parte del texto
+  // Estrategia 1: Buscar explícitamente en las líneas debajo de la etiqueta "DACTILAR"
+  const dactilarBajoEtiqueta = buscarDactilarBajoEtiqueta(textoUpper);
+  if (dactilarBajoEtiqueta) {
+    return dactilarBajoEtiqueta;
+  }
+
+  // Estrategia 2: Escanear tokens directos aislados en todo el texto (Formatos 2 y 3)
   const tokens = textoUpper
     .replace(/[^A-Z0-9\s-]/g, ' ')
     .split(/\s+/)
@@ -119,36 +171,18 @@ function extraerCodigoDactilar(textoUpper: string): string | null {
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i].replace(/[^A-Z0-9]/g, '');
 
-    // Caso 1: Token de 10 caracteres exactos (ej. V4343V4444, E3343I2222, V4333V2242)
-    if (token.length === 10 && esCandidatoDactilarValido(token)) {
-      return formatearDactilar(token);
+    // Caso A: Token de 10 caracteres exactos (ej. V4343V4444, E3343I2222, V4333V2242)
+    if (token.length === 10 && esCandidatoDactilarFlex(token)) {
+      return formatearDactilarFlex(token);
     }
 
-    // Caso 2: Código dividido por espacio en 2 tokens de 5 caracteres (ej. "V4343" "V4444")
+    // Caso B: Código dividido por espacio en 2 tokens de 5 caracteres (ej. "V4343" "V4444")
     if (token.length === 5 && i + 1 < tokens.length) {
       const tokenSig = tokens[i + 1].replace(/[^A-Z0-9]/g, '');
       if (tokenSig.length === 5) {
         const combinado = token + tokenSig;
-        if (esCandidatoDactilarValido(combinado)) {
-          return formatearDactilar(combinado);
-        }
-      }
-    }
-  }
-
-  // B. Buscar en la línea siguiente a etiquetas "DACTILAR" / "CÓDIGO DACTILAR"
-  const lineas = textoUpper.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  for (let i = 0; i < lineas.length; i++) {
-    const l = lineas[i];
-    if (l.includes('DACTILAR') || l.includes('CODIGO') || l.includes('CÓDIGO')) {
-      for (let j = i; j <= Math.min(i + 2, lineas.length - 1); j++) {
-        const lineaLimpia = lineas[j].replace(/.*(?:DACTILAR|CODIGO|CÓDIGO)\s*[:.-]?\s*/i, '');
-        const subTokens = lineaLimpia.replace(/[^A-Z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
-        for (const st of subTokens) {
-          const stLimpio = st.replace(/[^A-Z0-9]/g, '');
-          if (stLimpio.length === 10 && esCandidatoDactilarValido(stLimpio)) {
-            return formatearDactilar(stLimpio);
-          }
+        if (esCandidatoDactilarFlex(combinado)) {
+          return formatearDactilarFlex(combinado);
         }
       }
     }

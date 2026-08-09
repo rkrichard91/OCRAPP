@@ -239,7 +239,19 @@ assert(resF1Typo.segundoApellido === 'CORNEJO', 'F1 Typo: 2do Apellido debe ser 
 assert(resF1Typo.nombres === 'JERRY YUNIOR', 'F1 Typo: Nombres deben ser JERRY YUNIOR');
 assert(resF1Typo.codigoDactilar !== 'DACTILAR1', 'F1 Typo: Dactilar NO debe ser DACTILAR1');
 
+// 13. TEST: Código Dactilar ubicado en la línea INFERIOR a la etiqueta CÓDIGO DACTILAR
+const ocrDactilarBajoEtiqueta = `
+  MANTA 28 JUN 2023
+  DIRECTOR GENERAL
+  CODIGO DACTILAR
+  V4343V4444
+  TIPO SANGRE O+ DONANTE SI
+`;
+const resDactilarBajo = procesarTextoOCR(ocrDactilarBajoEtiqueta);
+assert(resDactilarBajo.codigoDactilar === 'V4343V4444', 'Test 13: Debe extraer V4343V4444 ubicado en la línea inferior a CODIGO DACTILAR');
+
 console.log('--- ALL TESTS COMPLETED SUCCESSFULLY! ---');
+
 
 
 
