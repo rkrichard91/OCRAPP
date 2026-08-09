@@ -1,285 +1,242 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, SafeAreaView, StatusBar, Alert, ScrollView } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
-import { OcrScanner } from './components/OcrScanner';
-import { DatosCedula } from './types/cedula';
+import { Header } from './components/Header';
+import { FileUploader } from './components/FileUploader';
+import { WebCameraScanner } from './components/WebCameraScanner';
+import { VerificationResultModal } from './components/VerificationResultModal';
+import { ejecutarOcrWeb } from './utils/webOcrEngine';
+import { consultarCedulaAPI } from './services/verificationService';
+import { DatosCedula, ApiVerificationResult } from './types/cedula';
+import { ShieldCheck, Cpu, Database, CheckCircle2, Lock } from 'lucide-react';
 
-export function App() {
-  const [modoEscaneo, setModoEscaneo] = useState(false);
-  const [abrirGaleriaAuto, setAbrirGaleriaAuto] = useState(false);
-  const [resultadoFinal, setResultadoFinal] = useState<DatosCedula | null>(null);
+export const App: React.FC = () => {
+  const [modoActivo, setModoActivo] = useState<'camara' | 'archivos'>('archivos');
+  const [cargando, setCargando] = useState(false);
+  const [progresoMensaje, setProgresoMensaje] = useState('');
 
-  const handleScanSuccess = (datos: DatosCedula) => {
-    setResultadoFinal(datos);
-    setModoEscaneo(false);
-    setAbrirGaleriaAuto(false);
+  const [datosAcumulados, setDatosAcumulados] = useState<DatosCedula>({
+    numeroDocumento: null,
+    codigoDactilar: null,
+    nombres: null,
+    primerApellido: null,
+    segundoApellido: null,
+    fechaNacimiento: null,
+    nacionalidad: null,
+    sexo: null,
+    esCedulaValida: false,
+    confianzaDocumento: 0,
+    rawText: '',
+  });
+
+  const [apiResult, setApiResult] = useState<ApiVerificationResult | null>(null);
+  const [modalVisible, setModalVisible] = useState(false);
+
+  /**
+   * Procesa imágenes cargadas desde archivos (Frente y/o Reverso)
+   */
+  const handleProcesarArchivos = async (frente: File | null, reverso: File | null) => {
+    setCargando(true);
+    let doc: string | null = null;
+    let dactilar: string | null = null;
+    let nom: string | null = null;
+    let ap1: string | null = null;
+    let ap2: string | null = null;
+    let fec: string | null = null;
+    let nac: string | null = null;
+    let sex: string | null = null;
+    let valida = false;
+    let maxConf = 0;
+    let rawStr = '';
+
+    try {
+      if (frente) {
+        setProgresoMensaje('Analizando foto del FRENTE...');
+        const resFrente = await ejecutarOcrWeb(frente, (pct, msg) => setProgresoMensaje(`Frente: ${msg}`));
+        if (resFrente.numeroDocumento) doc = resFrente.numeroDocumento;
+        if (resFrente.nombres) nom = resFrente.nombres;
+        if (resFrente.primerApellido) ap1 = resFrente.primerApellido;
+        if (resFrente.segundoApellido) ap2 = resFrente.segundoApellido;
+        if (resFrente.fechaNacimiento) fec = resFrente.fechaNacimiento;
+        if (resFrente.nacionalidad) nac = resFrente.nacionalidad;
+        if (resFrente.sexo) sex = resFrente.sexo;
+        if (resFrente.esCedulaValida) valida = true;
+        maxConf = Math.max(maxConf, resFrente.confianzaDocumento);
+        rawStr += '\n' + resFrente.rawText;
+      }
+
+      if (reverso) {
+        setProgresoMensaje('Analizando foto del REVERSO (Código Dactilar / MRZ)...');
+        const resReverso = await ejecutarOcrWeb(reverso, (pct, msg) => setProgresoMensaje(`Reverso: ${msg}`));
+        if (resReverso.numeroDocumento && !doc) doc = resReverso.numeroDocumento;
+        if (resReverso.codigoDactilar) dactilar = resReverso.codigoDactilar;
+        if (resReverso.nombres && !nom) nom = resReverso.nombres;
+        if (resReverso.primerApellido && !ap1) ap1 = resReverso.primerApellido;
+        if (resReverso.segundoApellido && !ap2) ap2 = resReverso.segundoApellido;
+        if (resReverso.esCedulaValida) valida = true;
+        maxConf = Math.max(maxConf, resReverso.confianzaDocumento);
+        rawStr += '\n' + resReverso.rawText;
+      }
+
+      const datosFinales: DatosCedula = {
+        numeroDocumento: doc,
+        codigoDactilar: dactilar,
+        nombres: nom,
+        primerApellido: ap1,
+        segundoApellido: ap2,
+        fechaNacimiento: fec,
+        nacionalidad: nac,
+        sexo: sex,
+        esCedulaValida: valida,
+        confianzaDocumento: maxConf,
+        rawText: rawStr.trim(),
+      };
+
+      setDatosAcumulados(datosFinales);
+
+      // Si existe un número de cédula, consultar la API pública de verificación
+      if (doc) {
+        setProgresoMensaje('Consultando API de Verificación Oficial en Ecuador...');
+        const apiRes = await consultarCedulaAPI(doc);
+        setApiResult(apiRes);
+      } else {
+        setApiResult(null);
+      }
+
+      setModalVisible(true);
+    } catch (error) {
+      console.error('Error al procesar archivos:', error);
+    } finally {
+      setCargando(false);
+    }
   };
 
-  const handleIniciarCamara = () => {
-    setAbrirGaleriaAuto(false);
-    setModoEscaneo(true);
-  };
+  /**
+   * Procesa la captura en tiempo real desde la cámara web
+   */
+  const handleCapturarFotoCamara = async (canvas: HTMLCanvasElement, lado: 'frente' | 'reverso') => {
+    setCargando(true);
+    setProgresoMensaje(`Analizando captura de la cámara (${lado.toUpperCase()})...`);
+    try {
+      const res = await ejecutarOcrWeb(canvas, (pct, msg) => setProgresoMensaje(msg));
 
-  const handleIniciarGaleria = () => {
-    setAbrirGaleriaAuto(true);
-    setModoEscaneo(true);
-  };
+      setDatosAcumulados((prev) => {
+        const nuevoDoc = res.numeroDocumento || prev.numeroDocumento;
+        const nuevoDactilar = res.codigoDactilar || prev.codigoDactilar;
+        const nuevosNombres = res.nombres || prev.nombres;
+        const nuevo1erAp = res.primerApellido || prev.primerApellido;
+        const nuevo2doAp = res.segundoApellido || prev.segundoApellido;
+        const nuevaFecha = res.fechaNacimiento || prev.fechaNacimiento;
+        const nuevaNac = res.nacionalidad || prev.nacionalidad;
+        const nuevoSexo = res.sexo || prev.sexo;
+        const esVal = res.esCedulaValida || prev.esCedulaValida;
 
-  const generarTextoFormateado = (datos: DatosCedula): string => {
-    return [
-      `Nro Documento: ${datos.numeroDocumento || 'N/A'}`,
-      `Codigo Dactilar: ${datos.codigoDactilar || 'N/A'}`,
-      `Nombres: ${datos.nombres || 'N/A'}`,
-      `1er Apellido: ${datos.primerApellido || 'N/A'}`,
-      `2do Apellido: ${datos.segundoApellido || 'N/A'}`,
-      `Fecha Nacimiento: ${datos.fechaNacimiento || 'N/A'}`,
-      `Nacionalidad: ${datos.nacionalidad || 'N/A'}`,
-      `Sexo: ${datos.sexo || 'N/A'}`,
-    ].join('\n');
-  };
+        const actualizados: DatosCedula = {
+          numeroDocumento: nuevoDoc,
+          codigoDactilar: nuevoDactilar,
+          nombres: nuevosNombres,
+          primerApellido: nuevo1erAp,
+          segundoApellido: nuevo2doAp,
+          fechaNacimiento: nuevaFecha,
+          nacionalidad: nuevaNac,
+          sexo: nuevoSexo,
+          esCedulaValida: esVal,
+          confianzaDocumento: Math.max(res.confianzaDocumento, prev.confianzaDocumento),
+          rawText: (prev.rawText + '\n' + res.rawText).trim(),
+        };
 
-  const handleCopiarTexto = async () => {
-    if (!resultadoFinal) return;
-    const texto = generarTextoFormateado(resultadoFinal);
-    await Clipboard.setStringAsync(texto);
-    Alert.alert('📋 ¡Copiado!', 'Datos copiados al portapapeles:\n\n' + texto);
-  };
+        if (nuevoDoc) {
+          consultarCedulaAPI(nuevoDoc).then((apiRes) => setApiResult(apiRes));
+        }
 
-  if (modoEscaneo) {
-    return (
-      <SafeAreaView style={styles.flexContainer}>
-        <StatusBar barStyle="light-content" backgroundColor="#000000" />
-        <OcrScanner
-          onScanSuccess={handleScanSuccess}
-          onCancel={() => {
-            setModoEscaneo(false);
-            setAbrirGaleriaAuto(false);
-          }}
-          autoOpenGallery={abrirGaleriaAuto}
-        />
-      </SafeAreaView>
-    );
-  }
+        if (lado === 'reverso' || (prev.primerApellido && prev.codigoDactilar)) {
+          setModalVisible(true);
+        }
+
+        return actualizados;
+      });
+    } catch (err) {
+      console.error('Error al procesar foto de cámara:', err);
+    } finally {
+      setCargando(false);
+    }
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
-        <View style={styles.card}>
-          <Text style={styles.title}>🇪🇨 Escáner OCR de Cédula</Text>
-          <Text style={styles.description}>
-            Reconocimiento inteligente de documentos de identidad ecuatorianos con lectura de 8 parámetros y verificación matemática Módulo 10.
-          </Text>
+    <div className="app-container">
+      <Header modoActivo={modoActivo} onCambiarModo={setModoActivo} />
 
-          {resultadoFinal ? (
-            <View style={styles.resultBox}>
-              <View style={styles.resultHeader}>
-                <Text style={styles.resultTitle}>📌 Cédula Registrada:</Text>
-                <TouchableOpacity style={styles.copyBadge} onPress={handleCopiarTexto}>
-                  <Text style={styles.copyBadgeText}>📋 Copiar Texto</Text>
-                </TouchableOpacity>
-              </View>
+      <main style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        {modoActivo === 'archivos' ? (
+          <FileUploader
+            onProcesarImagenes={handleProcesarArchivos}
+            cargando={cargando}
+            progresoMensaje={progresoMensaje}
+          />
+        ) : (
+          <WebCameraScanner
+            onCapturarFoto={handleCapturarFotoCamara}
+            cargando={cargando}
+          />
+        )}
 
-              <View style={styles.dataGrid}>
-                <View style={styles.dataRow}>
-                  <Text style={styles.dataLabel}>Nro Documento:</Text>
-                  <Text style={styles.dataValue}>{resultadoFinal.numeroDocumento || 'N/A'}</Text>
-                </View>
-                <View style={styles.dataRow}>
-                  <Text style={styles.dataLabel}>Codigo Dactilar:</Text>
-                  <Text style={styles.dataValue}>{resultadoFinal.codigoDactilar || 'N/A'}</Text>
-                </View>
-                <View style={styles.dataRow}>
-                  <Text style={styles.dataLabel}>Nombres:</Text>
-                  <Text style={styles.dataValue}>{resultadoFinal.nombres || 'N/A'}</Text>
-                </View>
-                <View style={styles.dataRow}>
-                  <Text style={styles.dataLabel}>1er Apellido:</Text>
-                  <Text style={styles.dataValue}>{resultadoFinal.primerApellido || 'N/A'}</Text>
-                </View>
-                <View style={styles.dataRow}>
-                  <Text style={styles.dataLabel}>2do Apellido:</Text>
-                  <Text style={styles.dataValue}>{resultadoFinal.segundoApellido || 'N/A'}</Text>
-                </View>
-                <View style={styles.dataRow}>
-                  <Text style={styles.dataLabel}>Fecha Nacimiento:</Text>
-                  <Text style={styles.dataValue}>{resultadoFinal.fechaNacimiento || 'N/A'}</Text>
-                </View>
-                <View style={styles.dataRow}>
-                  <Text style={styles.dataLabel}>Nacionalidad:</Text>
-                  <Text style={styles.dataValue}>{resultadoFinal.nacionalidad || 'N/A'}</Text>
-                </View>
-                <View style={styles.dataRow}>
-                  <Text style={styles.dataLabel}>Sexo:</Text>
-                  <Text style={styles.dataValue}>{resultadoFinal.sexo || 'N/A'}</Text>
-                </View>
-              </View>
+        {/* FEATURE HIGHLIGHTS */}
+        <section className="glass-panel" style={{ padding: '1.5rem' }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-main)' }}>
+            ✨ Capacidades y Seguridad de la Plataforma Web
+          </h3>
 
-              {resultadoFinal.esCedulaValida && (
-                <Text style={styles.badgeValid}>✓ Verificado por algoritmo Módulo 10</Text>
-              )}
-            </View>
-          ) : (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>No hay cédulas escaneadas aún.</Text>
-            </View>
-          )}
+          <div className="main-grid">
+            <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
+              <Cpu size={24} color="var(--accent-blue)" style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div>
+                <strong style={{ fontSize: '0.9rem', color: 'var(--text-main)' }}>OCR WebAssembly Tesseract.js</strong>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  Reconocimiento óptico de caracteres 100% en el cliente sin instalar descargas o APKs.
+                </p>
+              </div>
+            </div>
 
-          <View style={styles.buttonGroup}>
-            <TouchableOpacity
-              style={styles.scanButton}
-              onPress={handleIniciarCamara}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.scanButtonText}>📷 Escanear con Cámara</Text>
-            </TouchableOpacity>
+            <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
+              <Database size={24} color="var(--accent-emerald)" style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div>
+                <strong style={{ fontSize: '0.9rem', color: 'var(--text-main)' }}>Consulta API SRI / Verificación</strong>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  Contrasta el NUI con servicios públicos de verificación ecuatoriana para corroborar nombres oficiales.
+                </p>
+              </div>
+            </div>
 
-            <TouchableOpacity
-              style={styles.galleryButton}
-              onPress={handleIniciarGaleria}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.galleryButtonText}>🖼️ Escanear desde Imagen / Archivo</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+            <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
+              <CheckCircle2 size={24} color="var(--accent-gold)" style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div>
+                <strong style={{ fontSize: '0.9rem', color: 'var(--text-main)' }}>Validación Módulo 10</strong>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  Verifica el dígito verificador matemático y código provincial del Registro Civil de Ecuador.
+                </p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
+              <Lock size={24} color="var(--accent-purple)" style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div>
+                <strong style={{ fontSize: '0.9rem', color: 'var(--text-main)' }}>Privacidad de Datos</strong>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  Las imágenes no se guardan en servidores externos, cumpliendo con la Ley de Protección de Datos.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      {modalVisible && (
+        <VerificationResultModal
+          datos={datosAcumulados}
+          apiResult={apiResult}
+          onCerrar={() => setModalVisible(false)}
+        />
+      )}
+    </div>
   );
-}
-
-const styles = StyleSheet.create({
-  flexContainer: {
-    flex: 1,
-    backgroundColor: '#000000',
-  },
-  container: {
-    flex: 1,
-    backgroundColor: '#F3F4F6',
-  },
-  scrollContainer: {
-    padding: 20,
-    justifyContent: 'center',
-    flexGrow: 1,
-  },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#111827',
-    marginBottom: 8,
-  },
-  description: {
-    fontSize: 14,
-    color: '#4B5563',
-    lineHeight: 20,
-    marginBottom: 20,
-  },
-  emptyState: {
-    backgroundColor: '#F9FAFB',
-    borderRadius: 12,
-    padding: 20,
-    alignItems: 'center',
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderStyle: 'dashed',
-  },
-  emptyText: {
-    color: '#9CA3AF',
-    fontSize: 14,
-  },
-  resultBox: {
-    backgroundColor: '#F0FDF4',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#BBF7D0',
-  },
-  resultHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  resultTitle: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#166534',
-  },
-  copyBadge: {
-    backgroundColor: '#15803D',
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-  },
-  copyBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  dataGrid: {
-    gap: 6,
-  },
-  dataRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 2,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#DCFCE7',
-  },
-  dataLabel: {
-    color: '#374151',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  dataValue: {
-    color: '#111827',
-    fontWeight: 'bold',
-    fontSize: 13,
-  },
-  badgeValid: {
-    color: '#15803D',
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: 10,
-    textAlign: 'center',
-  },
-  buttonGroup: {
-    gap: 12,
-  },
-  scanButton: {
-    backgroundColor: '#2563EB',
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  scanButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  galleryButton: {
-    backgroundColor: '#7C3AED',
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  galleryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-});
+};
 
 export default App;

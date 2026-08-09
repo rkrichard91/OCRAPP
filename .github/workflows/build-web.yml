@@ -1,0 +1,38 @@
+name: Compilar App Web (GitHub Actions)
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-web:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Obtener código fuente
+        uses: actions/checkout@v4
+
+      - name: 🟢 Configurar Node.js (v20)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Instalar dependencias del proyecto
+        run: npm install --legacy-peer-deps
+
+      - name: 🧪 Ejecutar Pruebas Unitarias
+        run: npm test
+
+      - name: 🛠️ Compilar Bundle Web de Producción (Vite)
+        run: npm run build
+
+      - name: 📤 Subir Artefacto Web Descargable
+        uses: actions/upload-artifact@v4
+        with:
+          name: OCRAPP-Ecuador-Web-Production
+          path: dist/
+          if-no-files-found: error

@@ -18,4 +18,15 @@ export interface ValidacionCedulaResult {
   mensajeError?: string;
 }
 
+export interface ApiVerificationResult {
+  consultado: boolean;
+  exito: boolean;
+  fuente: string;
+  cedula: string | null;
+  nombreCompletoOficial: string | null;
+  estadoContribuyente?: string | null;
+  actividadEconomica?: string | null;
+  mensaje: string;
+}
+
 export type ScanStatus = 'idle' | 'scanning' | 'detected' | 'error';
