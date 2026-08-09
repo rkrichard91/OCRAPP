@@ -10,6 +10,7 @@
     "test": "powershell -ExecutionPolicy Bypass -Command \"npx -y tsx src/utils/ocrParser.test.ts\""
   },
   "dependencies": {
+    "@zxing/library": "^0.23.0",
     "lucide-react": "^0.344.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

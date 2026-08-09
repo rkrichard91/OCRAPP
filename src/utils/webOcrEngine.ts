@@ -1,6 +1,7 @@
 import { createWorker, Worker } from 'tesseract.js';
 import { procesarTextoOCR } from './ocrParser';
 import { DatosCedula } from '../types/cedula';
+import { decodificarCodigoBarras } from './barcodeReader';
 
 /**
  * Convierte cualquier tipo de entrada de imagen a un objeto HTMLImageElement
@@ -88,9 +89,18 @@ export async function ejecutarOcrWeb(
 ): Promise<DatosCedula> {
   let worker: Worker | null = null;
   try {
-    if (onProgress) onProgress(10, 'Iniciando motor OCR WebAssembly...');
-
     const imgElement = await cargarHTMLImage(imageSource);
+
+    // PASO 1: Escaneo instantáneo de Código de Barras PDF417 / QR
+    if (onProgress) onProgress(5, 'Escaneando Código de Barras PDF417/QR...');
+    const resBarcode = await decodificarCodigoBarras(imgElement);
+    if (resBarcode && (resBarcode.numeroDocumento || resBarcode.primerApellido)) {
+      if (onProgress) onProgress(100, '¡Código de Barras PDF417 decodificado con éxito!');
+      return resBarcode;
+    }
+
+    // PASO 2: Fallback a motor Tesseract.js WebAssembly Multi-Orientación
+    if (onProgress) onProgress(10, 'Iniciando motor OCR WebAssembly...');
     worker = await createWorker('spa');
 
     const angulos: (0 | 90 | 270 | 180)[] = [0, 90, 270, 180];
