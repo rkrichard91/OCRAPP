@@ -16,19 +16,16 @@ export const VerificationResultModal: React.FC<VerificationResultModalProps> = (
   const [copiado, setCopiado] = useState(false);
 
   const handleCopiarTexto = () => {
-    const textoResumen = `
-=== DATOS DE CÉDULA ECUATORIANA VERIFICADA ===
-• NÚMERO DE CÉDULA: ${datos.numeroDocumento || 'N/A'} (${datos.esCedulaValida ? 'Módulo 10 VÁLIDO ✅' : 'INVÁLIDO ❌'})
-• CÓDIGO DACTILAR: ${datos.codigoDactilar || 'N/A'}
-• 1er APELLIDO: ${datos.primerApellido || 'N/A'}
-• 2do APELLIDO: ${datos.segundoApellido || 'N/A'}
-• NOMBRES: ${datos.nombres || 'N/A'}
-• FECHA DE NACIMIENTO: ${datos.fechaNacimiento || 'N/A'}
-• NACIONALIDAD: ${datos.nacionalidad || 'N/A'}
-• SEXO: ${datos.sexo || 'N/A'}
-• ESTADO API VERIFICACIÓN: ${apiResult?.mensaje || 'Verificado'}
-===============================================
-    `.trim();
+    const textoResumen = [
+      `• NÚMERO DE CÉDULA: ${datos.numeroDocumento || 'N/A'}`,
+      `• CÓDIGO DACTILAR: ${datos.codigoDactilar || 'N/A'}`,
+      `• 1er APELLIDO: ${datos.primerApellido || 'N/A'}`,
+      `• 2do APELLIDO: ${datos.segundoApellido || 'N/A'}`,
+      `• NOMBRES: ${datos.nombres || 'N/A'}`,
+      `• FECHA DE NACIMIENTO: ${datos.fechaNacimiento || 'N/A'}`,
+      `• NACIONALIDAD: ${datos.nacionalidad || 'N/A'}`,
+      `• SEXO: ${datos.sexo || 'N/A'}`,
+    ].join('\n');
 
     navigator.clipboard.writeText(textoResumen);
     setCopiado(true);

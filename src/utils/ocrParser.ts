@@ -194,28 +194,45 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
       if (res.esValido) {
         numeroCedulaEncontrado = subCadena;
         esValido = true;
-        break;
       }
     }
   }
 
   // -------------------------------------------------------------
   // 2. CÓDIGO DACTILAR
-  // Formatos en reverso: V4444V4444, E3343I2222, V4333V2242 (10 caracteres exactos)
+  // Formatos en reverso: V4343V4444, E3343I2222, V4333V2242 (10 caracteres exactos)
   // -------------------------------------------------------------
   let codigoDactilarEncontrado: string | null = null;
-  const regexDactilarEstandar = /\b[A-Z]\d{4}[A-Z]\d{4}\b/g;
-  const matchesDactilar = textoUpper.match(regexDactilarEstandar) || [];
+  const matchesDirectosDactilar = textoUpper.match(/\b[A-Z0-9]{4,5}\s*[A-Z0-9]{4,5}\b/g) || [];
+  
+  for (const match of matchesDirectosDactilar) {
+    const limpio = match.replace(/\s+/g, '');
+    // Si son 10 dígitos puros, es el NUI (cédula), NO un código dactilar
+    if (/^\d{10}$/.test(limpio)) continue;
 
-  if (matchesDactilar.length > 0) {
-    codigoDactilarEncontrado = matchesDactilar[0];
-  } else {
-    const regexEtiqueta = /(?:DACTILAR|CODIGO|CÓDIGO|COD)\s*[:.-]?\s*([A-Z0-9\s]{8,12})/i;
-    const matchEtiqueta = textoUpper.match(regexEtiqueta);
+    if (limpio.length === 10 && !limpio.startsWith('DACTIL') && !limpio.startsWith('CODIGO')) {
+      const numDigitos = (limpio.match(/\d/g) || []).length;
+      if (numDigitos >= 6 && numDigitos <= 9) {
+        let dactilarFormateado = limpio;
+        if (/\d/.test(dactilarFormateado[0])) {
+          dactilarFormateado = 'V' + dactilarFormateado.substring(1);
+        }
+        if (/\d/.test(dactilarFormateado[5])) {
+          dactilarFormateado = dactilarFormateado.substring(0, 5) + 'I' + dactilarFormateado.substring(6);
+        }
+        codigoDactilarEncontrado = dactilarFormateado;
+        break;
+      }
+    }
+  }
+
+  if (!codigoDactilarEncontrado) {
+    const matchEtiqueta = textoUpper.match(/(?:DACTILAR|CODIGO|CÓDIGO|COD)\s*[:.-]?\s*([A-Z0-9\s]{8,14})/i);
     if (matchEtiqueta && matchEtiqueta[1]) {
-      const posibleDactilar = matchEtiqueta[1].replace(/\s+/g, '');
-      if (posibleDactilar.length === 10 && /\d{4}/.test(posibleDactilar)) {
-        let dactilarFormateado = posibleDactilar;
+      const candidato = matchEtiqueta[1].replace(/[^A-Z0-9]/g, '');
+      if (candidato.length >= 10 && !candidato.startsWith('DACTIL')) {
+        const sub10 = candidato.substring(0, 10);
+        let dactilarFormateado = sub10;
         if (/\d/.test(dactilarFormateado[0])) {
           dactilarFormateado = 'V' + dactilarFormateado.substring(1);
         }
@@ -312,6 +329,14 @@ export function procesarTextoOCR(textoCrudo: string): DatosCedula {
         if (textoNom) nombres = textoNom;
       }
     }
+  }
+
+  // Corregir erratas frecuentes de OCR en nombres propios (ej. YUÑIOR -> YUNIOR)
+  if (nombres) {
+    nombres = nombres
+      .replace(/\bYUÑIOR\b/gi, 'YUNIOR')
+      .replace(/\bYUÑOR\b/gi, 'YUNIOR')
+      .replace(/\bYU[ÑN]IOR\b/gi, 'YUNIOR');
   }
 
   // -------------------------------------------------------------
