@@ -144,9 +144,8 @@ export const App: React.FC = () => {
 
       setDatosAcumulados(actualizados);
 
-      if (lado === 'reverso' || (actualizados.primerApellido && actualizados.codigoDactilar)) {
-        setModalVisible(true);
-      }
+      // Mostrar modal de resultados con los datos de frente o reverso sin obligar al reverso
+      setModalVisible(true);
     } catch (err) {
       console.error('Error al procesar foto de cámara:', err);
     } finally {
@@ -169,6 +168,8 @@ export const App: React.FC = () => {
           <WebCameraScanner
             onCapturarFoto={handleCapturarFotoCamara}
             cargando={cargando}
+            onVerResultados={() => setModalVisible(true)}
+            tieneDatos={Boolean(datosAcumulados.numeroDocumento || datosAcumulados.primerApellido)}
           />
         )}
 

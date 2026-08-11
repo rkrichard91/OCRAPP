@@ -4,11 +4,15 @@ import { Camera, CheckCircle, RefreshCw, AlertCircle } from 'lucide-react';
 interface WebCameraScannerProps {
   onCapturarFoto: (canvas: HTMLCanvasElement, lado: 'frente' | 'reverso') => void;
   cargando: boolean;
+  onVerResultados?: () => void;
+  tieneDatos?: boolean;
 }
 
 export const WebCameraScanner: React.FC<WebCameraScannerProps> = ({
   onCapturarFoto,
   cargando,
+  onVerResultados,
+  tieneDatos,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [paso, setPaso] = useState<'frente' | 'reverso'>('frente');
@@ -64,26 +68,38 @@ export const WebCameraScanner: React.FC<WebCameraScannerProps> = ({
     if (ctx) {
       ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
       onCapturarFoto(canvas, paso);
-      if (paso === 'frente') {
-        setPaso('reverso');
-      }
     }
   };
 
   return (
     <div className="glass-panel" style={{ padding: '1.5rem', textAlign: 'center' }}>
-      <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
+      <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+        <div style={{ textAlign: 'left' }}>
           <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>
-            📷 Captura de Cédula en Tiempo Real ({paso === 'frente' ? 'FRENTE' : 'REVERSO'})
+            📷 Captura de Cédula ({paso === 'frente' ? 'FRENTE - Principal' : 'REVERSO - Opcional'})
           </h2>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            Encuadre la cédula dentro del marco amarillo para una lectura óptima
+            El <strong>Frente</strong> es suficiente para obtener todos los datos personales y la verificación API. El <strong>Reverso</strong> es opcional.
           </p>
         </div>
 
-        <div className="badge badge-warning">
-          Paso: {paso === 'frente' ? '1/2 (Frente)' : '2/2 (Reverso)'}
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button
+            type="button"
+            className={`btn ${paso === 'frente' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem' }}
+            onClick={() => setPaso('frente')}
+          >
+            1. Frente (Principal)
+          </button>
+          <button
+            type="button"
+            className={`btn ${paso === 'reverso' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem' }}
+            onClick={() => setPaso('reverso')}
+          >
+            2. Reverso (Opcional)
+          </button>
         </div>
       </div>
 
@@ -100,13 +116,13 @@ export const WebCameraScanner: React.FC<WebCameraScannerProps> = ({
           <video ref={videoRef} className="camera-video" playsInline muted />
           <div className="camera-overlay-frame">
             <span className="camera-guide-text">
-              {paso === 'frente' ? 'Ubique el FRENTE de la cédula' : 'Ubique el REVERSO (Código Dactilar)'}
+              {paso === 'frente' ? 'Ubique el FRENTE de la cédula' : 'Ubique el REVERSO (Código Dactilar - Opcional)'}
             </span>
           </div>
         </div>
       )}
 
-      <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'center', gap: '1rem' }}>
+      <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
         <button
           className="btn btn-primary"
           onClick={handleTomarFoto}
@@ -114,12 +130,13 @@ export const WebCameraScanner: React.FC<WebCameraScannerProps> = ({
           style={{ opacity: !camaraActiva || cargando ? 0.5 : 1 }}
         >
           <Camera size={18} />
-          <span>Capturar Foto ({paso.toUpperCase()})</span>
+          <span>Capturar Foto ({paso === 'frente' ? 'FRENTE' : 'REVERSO'})</span>
         </button>
 
-        {paso === 'reverso' && (
-          <button className="btn btn-secondary" onClick={() => setPaso('frente')}>
-            Volver a Frente
+        {tieneDatos && onVerResultados && (
+          <button className="btn btn-emerald" onClick={onVerResultados}>
+            <CheckCircle size={18} />
+            <span>Ver Resultados Extraídos</span>
           </button>
         )}
       </div>

@@ -144,8 +144,8 @@ export const VerificationResultModal: React.FC<VerificationResultModalProps> = (
 
           <div className="data-field-item">
             <span className="field-label">Código Dactilar</span>
-            <span className="field-value mono" style={{ color: 'var(--accent-cyan)' }}>
-              {datos.codigoDactilar || 'No detectado'}
+            <span className="field-value mono" style={{ color: datos.codigoDactilar ? 'var(--accent-cyan)' : 'var(--text-muted)' }}>
+              {datos.codigoDactilar || 'Opcional (Solo Frente)'}
             </span>
           </div>
 
