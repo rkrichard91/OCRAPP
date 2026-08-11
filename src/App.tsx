@@ -114,7 +114,11 @@ export const App: React.FC = () => {
   /**
    * Procesa la captura en tiempo real desde la cámara web
    */
-  const handleCapturarFotoCamara = async (canvas: HTMLCanvasElement, lado: 'frente' | 'reverso') => {
+  const handleCapturarFotoCamara = async (
+    canvas: HTMLCanvasElement,
+    lado: 'frente' | 'reverso',
+    abrirModalDirecto: boolean = false
+  ) => {
     setCargando(true);
     setProgresoMensaje(`Analizando captura de la cámara (${lado.toUpperCase()})...`);
     try {
@@ -144,8 +148,10 @@ export const App: React.FC = () => {
 
       setDatosAcumulados(actualizados);
 
-      // Mostrar modal de resultados con los datos de frente o reverso sin obligar al reverso
-      setModalVisible(true);
+      // Mostrar modal al escanear el reverso o si el usuario hace clic en Ver Resultados
+      if (lado === 'reverso' || abrirModalDirecto) {
+        setModalVisible(true);
+      }
     } catch (err) {
       console.error('Error al procesar foto de cámara:', err);
     } finally {

@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, CheckCircle, RefreshCw, AlertCircle } from 'lucide-react';
+import { Camera, CheckCircle, RefreshCw, AlertCircle, FileText } from 'lucide-react';
 
 interface WebCameraScannerProps {
-  onCapturarFoto: (canvas: HTMLCanvasElement, lado: 'frente' | 'reverso') => void;
+  onCapturarFoto: (canvas: HTMLCanvasElement, lado: 'frente' | 'reverso', abrirModalDirecto?: boolean) => void;
   cargando: boolean;
   onVerResultados?: () => void;
   tieneDatos?: boolean;
@@ -16,6 +16,7 @@ export const WebCameraScanner: React.FC<WebCameraScannerProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [paso, setPaso] = useState<'frente' | 'reverso'>('frente');
+  const [frenteCapturado, setFrenteCapturado] = useState(false);
   const [camaraActiva, setCamaraActiva] = useState(false);
   const [errorCamara, setErrorCamara] = useState<string | null>(null);
 
@@ -57,7 +58,7 @@ export const WebCameraScanner: React.FC<WebCameraScannerProps> = ({
     }
   };
 
-  const handleTomarFoto = () => {
+  const handleTomarFoto = (abrirModalDirecto: boolean = false) => {
     if (!videoRef.current || !camaraActiva) return;
 
     const canvas = document.createElement('canvas');
@@ -67,7 +68,11 @@ export const WebCameraScanner: React.FC<WebCameraScannerProps> = ({
     const ctx = canvas.getContext('2d');
     if (ctx) {
       ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      onCapturarFoto(canvas, paso);
+      onCapturarFoto(canvas, paso, abrirModalDirecto);
+      if (paso === 'frente') {
+        setFrenteCapturado(true);
+        setPaso('reverso');
+      }
     }
   };
 
@@ -79,7 +84,7 @@ export const WebCameraScanner: React.FC<WebCameraScannerProps> = ({
             📷 Captura de Cédula ({paso === 'frente' ? 'FRENTE - Principal' : 'REVERSO - Opcional'})
           </h2>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            El <strong>Frente</strong> es suficiente para obtener todos los datos personales y la verificación API. El <strong>Reverso</strong> es opcional.
+            El <strong>Frente</strong> es suficiente para obtener los datos y verificación. El <strong>Reverso</strong> es opcional.
           </p>
         </div>
 
@@ -90,7 +95,7 @@ export const WebCameraScanner: React.FC<WebCameraScannerProps> = ({
             style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem' }}
             onClick={() => setPaso('frente')}
           >
-            1. Frente (Principal)
+            1. Frente {frenteCapturado ? '✓' : ''}
           </button>
           <button
             type="button"
@@ -102,6 +107,29 @@ export const WebCameraScanner: React.FC<WebCameraScannerProps> = ({
           </button>
         </div>
       </div>
+
+      {frenteCapturado && paso === 'reverso' && (
+        <div
+          style={{
+            background: 'rgba(16, 185, 129, 0.15)',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            borderRadius: '10px',
+            padding: '0.75rem 1rem',
+            marginBottom: '1rem',
+            color: '#34d399',
+            fontSize: '0.85rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.5rem',
+          }}
+        >
+          <CheckCircle size={18} />
+          <span>
+            <strong>¡Foto del Frente procesada!</strong> Puedes escanear el REVERSO a continuación o hacer clic en <em>Finalizar y Ver Resultados</em>.
+          </span>
+        </div>
+      )}
 
       {errorCamara ? (
         <div style={{ padding: '2rem', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '12px', color: '#f87171' }}>
@@ -125,7 +153,7 @@ export const WebCameraScanner: React.FC<WebCameraScannerProps> = ({
       <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
         <button
           className="btn btn-primary"
-          onClick={handleTomarFoto}
+          onClick={() => handleTomarFoto(false)}
           disabled={!camaraActiva || cargando}
           style={{ opacity: !camaraActiva || cargando ? 0.5 : 1 }}
         >
@@ -133,10 +161,16 @@ export const WebCameraScanner: React.FC<WebCameraScannerProps> = ({
           <span>Capturar Foto ({paso === 'frente' ? 'FRENTE' : 'REVERSO'})</span>
         </button>
 
-        {tieneDatos && onVerResultados && (
+        {(tieneDatos || frenteCapturado) && onVerResultados && (
           <button className="btn btn-emerald" onClick={onVerResultados}>
-            <CheckCircle size={18} />
-            <span>Ver Resultados Extraídos</span>
+            <FileText size={18} />
+            <span>Finalizar y Ver Resultados</span>
+          </button>
+        )}
+
+        {paso === 'reverso' && frenteCapturado && (
+          <button className="btn btn-secondary" onClick={() => setPaso('frente')}>
+            Volver a Frente
           </button>
         )}
       </div>
